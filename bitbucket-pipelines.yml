@@ -1,0 +1,235 @@
+image: docker:latest
+
+options:
+  docker: true
+
+definitions:
+  services:
+    docker:
+      memory: 4096
+
+  steps:
+    - step: &build-addon
+        name: Build HomeSecure Add-on
+        services:
+          - docker
+        script:
+          - apk add --no-cache git jq curl bash
+          
+          # Install Docker buildx
+          - mkdir -p ~/.docker/cli-plugins
+          - wget -O ~/.docker/cli-plugins/docker-buildx https://github.com/docker/buildx/releases/download/v0.11.2/buildx-v0.11.2.linux-amd64
+          - chmod +x ~/.docker/cli-plugins/docker-buildx
+          - docker buildx version
+          
+          # Set up buildx
+          - docker buildx create --use --name homesecure-builder
+          - docker buildx inspect --bootstrap
+          
+          # Login to registries
+          - echo $DOCKER_PASSWORD | docker login -u $DOCKER_USERNAME --password-stdin
+          - echo $GITHUB_TOKEN | docker login ghcr.io -u $GITHUB_USERNAME --password-stdin
+          
+          # Get version from config.yaml
+          - export VERSION=$(grep 'version:' config.yaml | awk '{print $2}' | tr -d '"')
+          - echo "Building version $VERSION"
+          
+          # Build and push multi-arch images
+          - |
+            docker buildx build \
+              --platform linux/amd64,linux/arm64,linux/arm/v7 \
+              --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.19 \
+              --tag $DOCKER_USERNAME/homesecure-amd64:$VERSION \
+              --tag $DOCKER_USERNAME/homesecure-amd64:latest \
+              --tag ghcr.io/$GITHUB_USERNAME/homesecure-amd64:$VERSION \
+              --tag ghcr.io/$GITHUB_USERNAME/homesecure-amd64:latest \
+              --push \
+              .
+          
+          - |
+            docker buildx build \
+              --platform linux/arm64 \
+              --build-arg BUILD_FROM=ghcr.io/home-assistant/aarch64-base:3.19 \
+              --tag $DOCKER_USERNAME/homesecure-aarch64:$VERSION \
+              --tag $DOCKER_USERNAME/homesecure-aarch64:latest \
+              --tag ghcr.io/$GITHUB_USERNAME/homesecure-aarch64:$VERSION \
+              --tag ghcr.io/$GITHUB_USERNAME/homesecure-aarch64:latest \
+              --push \
+              .
+          
+          - |
+            docker buildx build \
+              --platform linux/arm/v7 \
+              --build-arg BUILD_FROM=ghcr.io/home-assistant/armv7-base:3.19 \
+              --tag $DOCKER_USERNAME/homesecure-armv7:$VERSION \
+              --tag $DOCKER_USERNAME/homesecure-armv7:latest \
+              --tag ghcr.io/$GITHUB_USERNAME/homesecure-armv7:$VERSION \
+              --tag ghcr.io/$GITHUB_USERNAME/homesecure-armv7:latest \
+              --push \
+              .
+          
+          - |
+            docker buildx build \
+              --platform linux/arm/v6 \
+              --build-arg BUILD_FROM=ghcr.io/home-assistant/armhf-base:3.19 \
+              --tag $DOCKER_USERNAME/homesecure-armhf:$VERSION \
+              --tag $DOCKER_USERNAME/homesecure-armhf:latest \
+              --tag ghcr.io/$GITHUB_USERNAME/homesecure-armhf:$VERSION \
+              --tag ghcr.io/$GITHUB_USERNAME/homesecure-armhf:latest \
+              --push \
+              .
+          
+          - |
+            docker buildx build \
+              --platform linux/386 \
+              --build-arg BUILD_FROM=ghcr.io/home-assistant/i386-base:3.19 \
+              --tag $DOCKER_USERNAME/homesecure-i386:$VERSION \
+              --tag $DOCKER_USERNAME/homesecure-i386:latest \
+              --tag ghcr.io/$GITHUB_USERNAME/homesecure-i386:$VERSION \
+              --tag ghcr.io/$GITHUB_USERNAME/homesecure-i386:latest \
+              --push \
+              .
+          
+          - echo "Build complete for version $VERSION"
+    
+    - step: &test-addon
+        name: Test Add-on Configuration
+        script:
+          - apk add --no-cache jq yq
+          
+          # Validate config.yaml
+          - echo "Validating config.yaml..."
+          - yq eval config.yaml > /dev/null
+          
+          # Validate JSON files
+          - |
+            for file in install/custom_components/homesecure/*.json; do
+              if [ -f "$file" ]; then
+                echo "Validating $file..."
+                jq empty "$file"
+              fi
+            done
+          
+          # Check required files exist
+          - test -f config.yaml || (echo "config.yaml missing" && exit 1)
+          - test -f Dockerfile || (echo "Dockerfile missing" && exit 1)
+          - test -f build.yaml || (echo "build.yaml missing" && exit 1)
+          - test -f run.sh || (echo "run.sh missing" && exit 1)
+          - test -f README.md || (echo "README.md missing" && exit 1)
+          
+          - echo "All validation checks passed"
+    
+    - step: &lint-python
+        name: Lint Python Code
+        image: python:3.11-alpine
+        script:
+          - pip install --no-cache-dir flake8 pylint black
+          
+          # Black formatting check
+          - black --check install/ || echo "Format issues found, run 'black install/'"
+          
+          # Flake8 linting
+          - flake8 install/ --max-line-length=120 --ignore=E203,W503 || echo "Flake8 issues found"
+          
+          # Check Python syntax
+          - python -m py_compile install/log_service.py
+          - python -m py_compile install/web_interface.py
+          
+          - |
+            for file in install/custom_components/homesecure/*.py; do
+              if [ -f "$file" ]; then
+                echo "Checking $file..."
+                python -m py_compile "$file"
+              fi
+            done
+
+pipelines:
+  default:
+    - step: *test-addon
+    - step: *lint-python
+  
+  branches:
+    main:
+      - step: *test-addon
+      - step: *lint-python
+      - step: *build-addon
+    
+    master:
+      - step: *test-addon
+      - step: *lint-python
+      - step: *build-addon
+  
+  tags:
+    'v*':
+      - step: *test-addon
+      - step: *lint-python
+      - step:
+          <<: *build-addon
+          name: Build and Release
+          after-script:
+            # Create release notes
+            - |
+              cat > RELEASE_NOTES.md <<EOF
+              # HomeSecure v$VERSION
+              
+              ## Docker Images
+              
+              - \`$DOCKER_USERNAME/homesecure-amd64:$VERSION\`
+              - \`$DOCKER_USERNAME/homesecure-aarch64:$VERSION\`
+              - \`$DOCKER_USERNAME/homesecure-armv7:$VERSION\`
+              - \`$DOCKER_USERNAME/homesecure-armhf:$VERSION\`
+              - \`$DOCKER_USERNAME/homesecure-i386:$VERSION\`
+              
+              Also available on GitHub Container Registry:
+              - \`ghcr.io/$GITHUB_USERNAME/homesecure-{arch}:$VERSION\`
+              
+              ## Installation
+              
+              Add this repository to your Home Assistant:
+              \`\`\`
+              https://bitbucket.org/$BITBUCKET_WORKSPACE/$BITBUCKET_REPO_SLUG
+              \`\`\`
+              
+              ## Changes
+              
+              See commit history for details.
+              EOF
+            
+            - cat RELEASE_NOTES.md
+  
+  pull-requests:
+    '**':
+      - step: *test-addon
+      - step: *lint-python
+
+  custom:
+    build-dev:
+      - step:
+          name: Build Development Version
+          services:
+            - docker
+          script:
+            - apk add --no-cache git jq curl bash
+            
+            # Install buildx
+            - mkdir -p ~/.docker/cli-plugins
+            - wget -O ~/.docker/cli-plugins/docker-buildx https://github.com/docker/buildx/releases/download/v0.11.2/buildx-v0.11.2.linux-amd64
+            - chmod +x ~/.docker/cli-plugins/docker-buildx
+            
+            - docker buildx create --use --name dev-builder
+            - docker buildx inspect --bootstrap
+            
+            # Login
+            - echo $DOCKER_PASSWORD | docker login -u $DOCKER_USERNAME --password-stdin
+            
+            # Build dev version (amd64 only for speed)
+            - export VERSION=$(grep 'version:' config.yaml | awk '{print $2}' | tr -d '"')-dev
+            - |
+              docker buildx build \
+                --platform linux/amd64 \
+                --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.19 \
+                --tag $DOCKER_USERNAME/homesecure-amd64:dev \
+                --push \
+                .
+            
+            - echo 'Development build complete: $DOCKER_USERNAME/homesecure-amd64:dev'

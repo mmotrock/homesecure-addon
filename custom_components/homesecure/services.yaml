@@ -1,0 +1,217 @@
+arm_away:
+  name: Arm Away
+  description: Arm the alarm system in away mode
+  fields:
+    pin:
+      name: PIN Code
+      description: User PIN code (6-8 digits)
+      required: true
+      example: "123456"
+      selector:
+        text:
+          type: password
+    code:
+      name: User Code
+      description: Optional user identifier
+      required: false
+      example: "user1"
+      selector:
+        text:
+
+arm_home:
+  name: Arm Home
+  description: Arm the alarm system in home mode
+  fields:
+    pin:
+      name: PIN Code
+      description: User PIN code (6-8 digits)
+      required: true
+      example: "123456"
+      selector:
+        text:
+          type: password
+    code:
+      name: User Code
+      description: Optional user identifier
+      required: false
+      example: "user1"
+      selector:
+        text:
+
+disarm:
+  name: Disarm
+  description: Disarm the alarm system
+  fields:
+    pin:
+      name: PIN Code
+      description: User PIN code (6-8 digits)
+      required: true
+      example: "123456"
+      selector:
+        text:
+          type: password
+    code:
+      name: User Code
+      description: Optional user identifier
+      required: false
+      example: "user1"
+      selector:
+        text:
+
+add_user:
+  name: Add User
+  description: Add a new user with PIN code
+  fields:
+    name:
+      name: User Name
+      description: Name for the new user
+      required: true
+      example: "John Doe"
+      selector:
+        text:
+    pin:
+      name: PIN Code
+      description: New PIN code (6-8 digits)
+      required: true
+      example: "654321"
+      selector:
+        text:
+          type: password
+    admin_pin:
+      name: Admin PIN
+      description: Administrator PIN for authorization
+      required: true
+      example: "123456"
+      selector:
+        text:
+          type: password
+    is_admin:
+      name: Is Administrator
+      description: Grant administrator privileges to this user
+      required: false
+      default: false
+      selector:
+        boolean:
+    is_duress:
+      name: Is Duress Code
+      description: This is a duress code (will silently alert when used)
+      required: false
+      default: false
+      selector:
+        boolean:
+
+remove_user:
+  name: Remove User
+  description: Remove a user from the system
+  fields:
+    user_id:
+      name: User ID
+      description: ID of the user to remove
+      required: true
+      example: 2
+      selector:
+        number:
+          min: 1
+          max: 999
+          mode: box
+    admin_pin:
+      name: Admin PIN
+      description: Administrator PIN for authorization
+      required: true
+      example: "123456"
+      selector:
+        text:
+          type: password
+
+bypass_zone:
+  name: Bypass Zone
+  description: Bypass or unbypass a zone
+  fields:
+    zone_entity_id:
+      name: Zone Entity
+      description: Entity ID of the zone to bypass
+      required: true
+      example: "binary_sensor.front_door"
+      selector:
+        entity:
+          domain: binary_sensor
+    pin:
+      name: PIN Code
+      description: User PIN code
+      required: true
+      example: "123456"
+      selector:
+        text:
+          type: password
+    bypass:
+      name: Bypass
+      description: True to bypass, False to unbypass
+      required: false
+      default: true
+      selector:
+        boolean:
+
+update_config:
+  name: Update Configuration
+  description: Update alarm system configuration
+  fields:
+    admin_pin:
+      name: Admin PIN
+      description: Administrator PIN for authorization
+      required: true
+      example: "123456"
+      selector:
+        text:
+          type: password
+    entry_delay:
+      name: Entry Delay
+      description: Delay in seconds before triggering alarm after entry
+      required: false
+      example: 30
+      selector:
+        number:
+          min: 0
+          max: 300
+          unit_of_measurement: seconds
+          mode: box
+    exit_delay:
+      name: Exit Delay
+      description: Delay in seconds before arming after arm away command
+      required: false
+      example: 60
+      selector:
+        number:
+          min: 0
+          max: 300
+          unit_of_measurement: seconds
+          mode: box
+    alarm_duration:
+      name: Alarm Duration
+      description: Duration in seconds the alarm will sound
+      required: false
+      example: 300
+      selector:
+        number:
+          min: 60
+          max: 3600
+          unit_of_measurement: seconds
+          mode: box
+    notification_mobile:
+      name: Mobile Notifications
+      description: Enable mobile app notifications
+      required: false
+      selector:
+        boolean:
+    notification_sms:
+      name: SMS Notifications
+      description: Enable SMS notifications
+      required: false
+      selector:
+        boolean:
+    sms_numbers:
+      name: SMS Numbers
+      description: Comma-separated list of phone numbers for SMS alerts
+      required: false
+      example: "+15551234567,+15559876543"
+      selector:
+        text:

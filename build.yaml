@@ -1,0 +1,310 @@
+#build_from:
+#  aarch64: ghcr.io/home-assistant/aarch64-base:3.19
+#  amd64: ghcr.io/home-assistant/amd64-base:3.19
+#  armhf: ghcr.io/home-assistant/armhf-base:3.19
+#  armv7: ghcr.io/home-assistant/armv7-base:3.19
+#  i386: ghcr.io/home-assistant/i386-base:3.19
+#labels:
+#  org.opencontainers.image.title: "HomeSecure"
+#  org.opencontainers.image.description: "Complete home security system with alarm panel and lock management"
+#  org.opencontainers.image.source: "https://github.com/motrock/homesecure"
+#  org.opencontainers.image.licenses: "MIT"
+#args:
+#  TEMPIO_VERSION: "2021.09.0"
+name: Build and Test HomeSecure
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      build_dev:
+        description: 'Build development version'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  GITHUB_USERNAME: motrock
+
+jobs:
+  test:
+    name: Test Add-on Configuration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+          pip install pyyaml
+
+      - name: Validate config.yaml
+        run: |
+          echo "Validating config.yaml..."
+          python3 -c "import yaml; yaml.safe_load(open('config.yaml'))"
+
+      - name: Validate build.yaml
+        run: |
+          echo "Validating build.yaml..."
+          python3 -c "import yaml; yaml.safe_load(open('build.yaml'))"
+
+      - name: Validate JSON files
+        run: |
+          for file in custom_components/homesecure/*.json; do
+            if [ -f "$file" ]; then
+              echo "Validating $file..."
+              jq empty "$file"
+            fi
+          done
+
+      - name: Check required files
+        run: |
+          test -f config.yaml || (echo "config.yaml missing" && exit 1)
+          test -f Dockerfile || (echo "Dockerfile missing" && exit 1)
+          test -f build.yaml || (echo "build.yaml missing" && exit 1)
+          test -f run.sh || (echo "run.sh missing" && exit 1)
+          test -f README.md || (echo "README.md missing" && exit 1)
+          echo "All required files present"
+
+  lint:
+    name: Lint Python Code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install linting tools
+        run: |
+          pip install flake8 pylint black
+
+      - name: Black formatting check
+        run: |
+          black --check . || echo "Format issues found, run 'black .'"
+        continue-on-error: true
+
+      - name: Flake8 linting
+        run: |
+          flake8 . --max-line-length=120 --ignore=E203,W503 --exclude=.git,__pycache__,.github
+        continue-on-error: true
+
+      - name: Check Python syntax
+        run: |
+          python -m py_compile log_service.py
+          python -m py_compile web_interface.py
+          for file in custom_components/homesecure/*.py; do
+            if [ -f "$file" ]; then
+              echo "Checking $file..."
+              python -m py_compile "$file"
+            fi
+          done
+
+  build:
+    name: Build Multi-Architecture Images
+    runs-on: ubuntu-latest
+    needs: [test, lint]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get version from config.yaml
+        id: version
+        run: |
+          VERSION=$(grep 'version:' config.yaml | awk '{print $2}' | tr -d '"')
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building version $VERSION"
+
+      - name: Build and push amd64 image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64
+          build-args: BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.19
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/homesecure-amd64:${{ steps.version.outputs.VERSION }}
+            ${{ secrets.DOCKER_USERNAME }}/homesecure-amd64:latest
+            ghcr.io/${{ env.GITHUB_USERNAME }}/homesecure-amd64:${{ steps.version.outputs.VERSION }}
+            ghcr.io/${{ env.GITHUB_USERNAME }}/homesecure-amd64:latest
+
+      - name: Build and push aarch64 image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/arm64
+          build-args: BUILD_FROM=ghcr.io/home-assistant/aarch64-base:3.19
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/homesecure-aarch64:${{ steps.version.outputs.VERSION }}
+            ${{ secrets.DOCKER_USERNAME }}/homesecure-aarch64:latest
+            ghcr.io/${{ env.GITHUB_USERNAME }}/homesecure-aarch64:${{ steps.version.outputs.VERSION }}
+            ghcr.io/${{ env.GITHUB_USERNAME }}/homesecure-aarch64:latest
+
+      - name: Build and push armv7 image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/arm/v7
+          build-args: BUILD_FROM=ghcr.io/home-assistant/armv7-base:3.19
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/homesecure-armv7:${{ steps.version.outputs.VERSION }}
+            ${{ secrets.DOCKER_USERNAME }}/homesecure-armv7:latest
+            ghcr.io/${{ env.GITHUB_USERNAME }}/homesecure-armv7:${{ steps.version.outputs.VERSION }}
+            ghcr.io/${{ env.GITHUB_USERNAME }}/homesecure-armv7:latest
+
+      - name: Build and push armhf image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/arm/v6
+          build-args: BUILD_FROM=ghcr.io/home-assistant/armhf-base:3.19
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/homesecure-armhf:${{ steps.version.outputs.VERSION }}
+            ${{ secrets.DOCKER_USERNAME }}/homesecure-armhf:latest
+            ghcr.io/${{ env.GITHUB_USERNAME }}/homesecure-armhf:${{ steps.version.outputs.VERSION }}
+            ghcr.io/${{ env.GITHUB_USERNAME }}/homesecure-armhf:latest
+
+      - name: Build and push i386 image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/386
+          build-args: BUILD_FROM=ghcr.io/home-assistant/i386-base:3.19
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/homesecure-i386:${{ steps.version.outputs.VERSION }}
+            ${{ secrets.DOCKER_USERNAME }}/homesecure-i386:latest
+            ghcr.io/${{ env.GITHUB_USERNAME }}/homesecure-i386:${{ steps.version.outputs.VERSION }}
+            ghcr.io/${{ env.GITHUB_USERNAME }}/homesecure-i386:latest
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get version from config.yaml
+        id: version
+        run: |
+          VERSION=$(grep 'version:' config.yaml | awk '{print $2}' | tr -d '"')
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create release notes
+        run: |
+          cat > RELEASE_NOTES.md <<EOF
+          # HomeSecure v${{ steps.version.outputs.VERSION }}
+          
+          ## Docker Images
+          
+          ### Docker Hub
+          - \`${{ secrets.DOCKER_USERNAME }}/homesecure-amd64:${{ steps.version.outputs.VERSION }}\`
+          - \`${{ secrets.DOCKER_USERNAME }}/homesecure-aarch64:${{ steps.version.outputs.VERSION }}\`
+          - \`${{ secrets.DOCKER_USERNAME }}/homesecure-armv7:${{ steps.version.outputs.VERSION }}\`
+          - \`${{ secrets.DOCKER_USERNAME }}/homesecure-armhf:${{ steps.version.outputs.VERSION }}\`
+          - \`${{ secrets.DOCKER_USERNAME }}/homesecure-i386:${{ steps.version.outputs.VERSION }}\`
+          
+          ### GitHub Container Registry
+          - \`ghcr.io/${{ env.GITHUB_USERNAME }}/homesecure-amd64:${{ steps.version.outputs.VERSION }}\`
+          - \`ghcr.io/${{ env.GITHUB_USERNAME }}/homesecure-aarch64:${{ steps.version.outputs.VERSION }}\`
+          - \`ghcr.io/${{ env.GITHUB_USERNAME }}/homesecure-armv7:${{ steps.version.outputs.VERSION }}\`
+          - \`ghcr.io/${{ env.GITHUB_USERNAME }}/homesecure-armhf:${{ steps.version.outputs.VERSION }}\`
+          - \`ghcr.io/${{ env.GITHUB_USERNAME }}/homesecure-i386:${{ steps.version.outputs.VERSION }}\`
+          
+          ## Installation
+          
+          Add this repository to your Home Assistant:
+          \`\`\`
+          https://github.com/${{ env.GITHUB_USERNAME }}/homesecure-addon
+          \`\`\`
+          
+          ## Changes
+          
+          See commit history for details.
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          body_path: RELEASE_NOTES.md
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-dev:
+    name: Build Development Version
+    runs-on: ubuntu-latest
+    if: github.event.inputs.build_dev == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push dev image (amd64 only)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64
+          build-args: BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.19
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/homesecure-amd64:dev

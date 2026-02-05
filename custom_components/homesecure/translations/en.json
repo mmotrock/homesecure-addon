@@ -1,0 +1,38 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Secure Alarm System",
+        "description": "Create your administrator account to manage the alarm system.",
+        "data": {
+          "admin_name": "Administrator Name",
+          "admin_pin": "Administrator PIN (6-8 digits)",
+          "admin_pin_confirm": "Confirm Administrator PIN"
+        }
+      }
+    },
+    "error": {
+      "pin_length": "PIN must be 6-8 digits",
+      "pin_mismatch": "PINs do not match",
+      "pin_numeric": "PIN must contain only numbers",
+      "cannot_connect": "Failed to connect to database",
+      "unknown": "Unexpected error occurred"
+    },
+    "abort": {
+      "already_configured": "Secure Alarm System is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Alarm System Options",
+        "description": "Configure timing and notification settings.",
+        "data": {
+          "entry_delay": "Entry Delay (seconds)",
+          "exit_delay": "Exit Delay (seconds)",
+          "alarm_duration": "Alarm Duration (seconds)"
+        }
+      }
+    }
+  }
+}
