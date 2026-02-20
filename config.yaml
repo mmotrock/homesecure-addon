@@ -2,7 +2,7 @@ name: HomeSecure
 version: "1.0.0"
 slug: homesecure
 description: Complete home security system with alarm panel, user management, and Z-Wave lock integration
-url: https://github.com/motrock/homesecure-addon
+url: https://github.com/mmotrock/homesecure-addon
 arch:
   - armhf
   - armv7
@@ -44,4 +44,4 @@ map:
   - share:rw
   - ssl:ro
 
-image: "ghcr.io/motrock/homesecure-{arch}"
+image: "ghcr.io/mmotrock/homesecure-{arch}"
