@@ -56,7 +56,7 @@ A professional-grade security system for Home Assistant with alarm control, Z-Wa
 
 1. **Add Repository to Home Assistant**
    - Go to **Supervisor** → **Add-on Store** → **⋮** → **Repositories**
-   - Add: `https://bitbucket.org/YOUR_USERNAME/homesecure-addon`
+   - Add: `https://bitbucket.org/mmotrock/homesecure-addon`
    - Click **Add**
 
 2. **Install Add-on**
