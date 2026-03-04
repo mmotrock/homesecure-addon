@@ -22,6 +22,10 @@ on:
 env:
   GITHUB_USERNAME: mmotrock
 
+permissions:
+  contents: write
+  packages: write
+
 jobs:
   test:
     name: Test Add-on Configuration
@@ -152,8 +156,8 @@ jobs:
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/homesecure-amd64:${{ steps.version.outputs.VERSION }}
             ${{ secrets.DOCKER_USERNAME }}/homesecure-amd64:latest
-            ghcr.io/${{ env.GITHUB_USERNAME }}/homesecure-amd64:${{ steps.version.outputs.VERSION }}
-            ghcr.io/${{ env.GITHUB_USERNAME }}/homesecure-amd64:latest
+            ghcr.io/${{ github.repository_owner }}/homesecure-amd64:${{ steps.version.outputs.VERSION }}
+            ghcr.io/${{ github.repository_owner }}/homesecure-amd64:latest
 
       - name: Build and push aarch64 image
         uses: docker/build-push-action@v5
@@ -165,8 +169,8 @@ jobs:
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/homesecure-aarch64:${{ steps.version.outputs.VERSION }}
             ${{ secrets.DOCKER_USERNAME }}/homesecure-aarch64:latest
-            ghcr.io/${{ env.GITHUB_USERNAME }}/homesecure-aarch64:${{ steps.version.outputs.VERSION }}
-            ghcr.io/${{ env.GITHUB_USERNAME }}/homesecure-aarch64:latest
+            ghcr.io/${{ github.repository_owner }}/homesecure-aarch64:${{ steps.version.outputs.VERSION }}
+            ghcr.io/${{ github.repository_owner }}/homesecure-aarch64:latest
 
       - name: Build and push armv7 image
         uses: docker/build-push-action@v5
@@ -178,8 +182,8 @@ jobs:
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/homesecure-armv7:${{ steps.version.outputs.VERSION }}
             ${{ secrets.DOCKER_USERNAME }}/homesecure-armv7:latest
-            ghcr.io/${{ env.GITHUB_USERNAME }}/homesecure-armv7:${{ steps.version.outputs.VERSION }}
-            ghcr.io/${{ env.GITHUB_USERNAME }}/homesecure-armv7:latest
+            ghcr.io/${{ github.repository_owner }}/homesecure-armv7:${{ steps.version.outputs.VERSION }}
+            ghcr.io/${{ github.repository_owner }}/homesecure-armv7:latest
 
       - name: Build and push armhf image
         uses: docker/build-push-action@v5
@@ -191,8 +195,8 @@ jobs:
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/homesecure-armhf:${{ steps.version.outputs.VERSION }}
             ${{ secrets.DOCKER_USERNAME }}/homesecure-armhf:latest
-            ghcr.io/${{ env.GITHUB_USERNAME }}/homesecure-armhf:${{ steps.version.outputs.VERSION }}
-            ghcr.io/${{ env.GITHUB_USERNAME }}/homesecure-armhf:latest
+            ghcr.io/${{ github.repository_owner }}/homesecure-armhf:${{ steps.version.outputs.VERSION }}
+            ghcr.io/${{ github.repository_owner }}/homesecure-armhf:latest
 
       - name: Build and push i386 image
         uses: docker/build-push-action@v5
@@ -204,8 +208,8 @@ jobs:
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/homesecure-i386:${{ steps.version.outputs.VERSION }}
             ${{ secrets.DOCKER_USERNAME }}/homesecure-i386:latest
-            ghcr.io/${{ env.GITHUB_USERNAME }}/homesecure-i386:${{ steps.version.outputs.VERSION }}
-            ghcr.io/${{ env.GITHUB_USERNAME }}/homesecure-i386:latest
+            ghcr.io/${{ github.repository_owner }}/homesecure-i386:${{ steps.version.outputs.VERSION }}
+            ghcr.io/${{ github.repository_owner }}/homesecure-i386:latest
 
   release:
     name: Create GitHub Release
@@ -238,17 +242,17 @@ jobs:
           - \`${{ secrets.DOCKER_USERNAME }}/homesecure-i386:${{ steps.version.outputs.VERSION }}\`
 
           ### GitHub Container Registry
-          - \`ghcr.io/${{ env.GITHUB_USERNAME }}/homesecure-amd64:${{ steps.version.outputs.VERSION }}\`
-          - \`ghcr.io/${{ env.GITHUB_USERNAME }}/homesecure-aarch64:${{ steps.version.outputs.VERSION }}\`
-          - \`ghcr.io/${{ env.GITHUB_USERNAME }}/homesecure-armv7:${{ steps.version.outputs.VERSION }}\`
-          - \`ghcr.io/${{ env.GITHUB_USERNAME }}/homesecure-armhf:${{ steps.version.outputs.VERSION }}\`
-          - \`ghcr.io/${{ env.GITHUB_USERNAME }}/homesecure-i386:${{ steps.version.outputs.VERSION }}\`
+          - \`ghcr.io/${{ github.repository_owner }}/homesecure-amd64:${{ steps.version.outputs.VERSION }}\`
+          - \`ghcr.io/${{ github.repository_owner }}/homesecure-aarch64:${{ steps.version.outputs.VERSION }}\`
+          - \`ghcr.io/${{ github.repository_owner }}/homesecure-armv7:${{ steps.version.outputs.VERSION }}\`
+          - \`ghcr.io/${{ github.repository_owner }}/homesecure-armhf:${{ steps.version.outputs.VERSION }}\`
+          - \`ghcr.io/${{ github.repository_owner }}/homesecure-i386:${{ steps.version.outputs.VERSION }}\`
 
           ## Installation
 
           Add this repository to your Home Assistant:
           \`\`\`
-          https://github.com/${{ env.GITHUB_USERNAME }}/homesecure-addon
+          https://github.com/${{ github.repository_owner }}/homesecure-addon
           \`\`\`
 
           ## Changes
