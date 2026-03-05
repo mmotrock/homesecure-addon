@@ -2,6 +2,8 @@ ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.19
 FROM ${BUILD_FROM}
 
 ENV LANG=C.UTF-8
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # Install system requirements + build deps needed to compile Python packages
 RUN apk add --no-cache \
@@ -18,14 +20,13 @@ RUN apk add --no-cache \
     cargo \
     openssl-dev
 
-# Install Python packages
-# bcrypt needs cargo/rust on Alpine for its Rust-based cryptography backend
-# aiohttp needs gcc/musl-dev
-RUN pip3 install --no-cache-dir --verbose \
-    bcrypt \
-    zwave-js-server-python \
-    aiohttp \
-    pyyaml
+# Create virtual environment and install Python packages inside it
+RUN python3 -m venv $VIRTUAL_ENV && \
+    pip install --no-cache-dir \
+        bcrypt \
+        zwave-js-server-python \
+        aiohttp \
+        pyyaml
 
 # Copy root filesystem
 COPY rootfs /
