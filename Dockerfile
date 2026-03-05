@@ -21,7 +21,7 @@ RUN apk add --no-cache \
 # Install Python packages
 # bcrypt needs cargo/rust on Alpine for its Rust-based cryptography backend
 # aiohttp needs gcc/musl-dev
-RUN pip3 install --no-cache-dir \
+RUN pip3 install --no-cache-dir --verbose \
     bcrypt \
     zwave-js-server-python \
     aiohttp \
