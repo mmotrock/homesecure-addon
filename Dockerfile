@@ -13,7 +13,7 @@ RUN apk add --no-cache \
     bash
 
 # Install Python packages
-RUN pip3 install --no-cache-dir --break-system-packages \
+RUN pip3 install --no-cache-dir \
     bcrypt \
     zwave-js-server-python \
     aiohttp \
