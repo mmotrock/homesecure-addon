@@ -19,9 +19,6 @@ on:
         type: boolean
         default: false
 
-env:
-  GITHUB_USERNAME: mmotrock
-
 permissions:
   contents: write
   packages: write
@@ -48,16 +45,16 @@ jobs:
       - name: Validate config.yaml
         run: |
           echo "Validating config.yaml..."
-          python3 -c "import yaml; yaml.safe_load(open('config.yaml'))"
+          python3 -c "import yaml; yaml.safe_load(open('homesecure/config.yaml'))"
 
       - name: Validate build.yaml
         run: |
           echo "Validating build.yaml..."
-          python3 -c "import yaml; yaml.safe_load(open('build.yaml'))"
+          python3 -c "import yaml; yaml.safe_load(open('homesecure/build.yaml'))"
 
       - name: Validate JSON files
         run: |
-          for file in custom_components/homesecure/*.json; do
+          for file in homesecure/custom_components/homesecure/*.json; do
             if [ -f "$file" ]; then
               echo "Validating $file..."
               jq empty "$file"
@@ -66,11 +63,12 @@ jobs:
 
       - name: Check required files
         run: |
-          test -f config.yaml || (echo "config.yaml missing" && exit 1)
-          test -f Dockerfile || (echo "Dockerfile missing" && exit 1)
-          test -f build.yaml || (echo "build.yaml missing" && exit 1)
-          test -f run.sh || (echo "run.sh missing" && exit 1)
-          test -f README.md || (echo "README.md missing" && exit 1)
+          test -f homesecure/config.yaml  || (echo "homesecure/config.yaml missing"  && exit 1)
+          test -f homesecure/Dockerfile   || (echo "homesecure/Dockerfile missing"   && exit 1)
+          test -f homesecure/build.yaml   || (echo "homesecure/build.yaml missing"   && exit 1)
+          test -f homesecure/run.sh       || (echo "homesecure/run.sh missing"       && exit 1)
+          test -f homesecure/README.md    || (echo "homesecure/README.md missing"    && exit 1)
+          test -f repository.json         || (echo "repository.json missing"         && exit 1)
           echo "All required files present"
 
   lint:
@@ -91,19 +89,19 @@ jobs:
 
       - name: Black formatting check
         run: |
-          black --check . || echo "Format issues found, run 'black .'"
+          black --check homesecure/ || echo "Format issues found, run 'black homesecure/'"
         continue-on-error: true
 
       - name: Flake8 linting
         run: |
-          flake8 . --max-line-length=120 --ignore=E203,W503 --exclude=.git,__pycache__,.github
+          flake8 homesecure/ --max-line-length=120 --ignore=E203,W503 --exclude=__pycache__
         continue-on-error: true
 
       - name: Check Python syntax
         run: |
-          python -m py_compile log_service.py
-          python -m py_compile web_interface.py
-          for file in custom_components/homesecure/*.py; do
+          python -m py_compile homesecure/log_service.py
+          python -m py_compile homesecure/web_interface.py
+          for file in homesecure/custom_components/homesecure/*.py; do
             if [ -f "$file" ]; then
               echo "Checking $file..."
               python -m py_compile "$file"
@@ -142,14 +140,14 @@ jobs:
       - name: Get version from config.yaml
         id: version
         run: |
-          VERSION=$(grep 'version:' config.yaml | awk '{print $2}' | tr -d '"')
+          VERSION=$(grep 'version:' homesecure/config.yaml | awk '{print $2}' | tr -d '"')
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           echo "Building version $VERSION"
 
       - name: Build and push amd64 image
         uses: docker/build-push-action@v5
         with:
-          context: .
+          context: ./homesecure
           platforms: linux/amd64
           build-args: BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.19
           push: true
@@ -162,7 +160,7 @@ jobs:
       - name: Build and push aarch64 image
         uses: docker/build-push-action@v5
         with:
-          context: .
+          context: ./homesecure
           platforms: linux/arm64
           build-args: BUILD_FROM=ghcr.io/home-assistant/aarch64-base:3.19
           push: true
@@ -175,7 +173,7 @@ jobs:
       - name: Build and push armv7 image
         uses: docker/build-push-action@v5
         with:
-          context: .
+          context: ./homesecure
           platforms: linux/arm/v7
           build-args: BUILD_FROM=ghcr.io/home-assistant/armv7-base:3.19
           push: true
@@ -188,7 +186,7 @@ jobs:
       - name: Build and push armhf image
         uses: docker/build-push-action@v5
         with:
-          context: .
+          context: ./homesecure
           platforms: linux/arm/v6
           build-args: BUILD_FROM=ghcr.io/home-assistant/armhf-base:3.19
           push: true
@@ -201,7 +199,7 @@ jobs:
       - name: Build and push i386 image
         uses: docker/build-push-action@v5
         with:
-          context: .
+          context: ./homesecure
           platforms: linux/386
           build-args: BUILD_FROM=ghcr.io/home-assistant/i386-base:3.19
           push: true
@@ -224,7 +222,7 @@ jobs:
       - name: Get version from config.yaml
         id: version
         run: |
-          VERSION=$(grep 'version:' config.yaml | awk '{print $2}' | tr -d '"')
+          VERSION=$(grep 'version:' homesecure/config.yaml | awk '{print $2}' | tr -d '"')
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Create release notes
@@ -293,7 +291,7 @@ jobs:
       - name: Build and push dev image (amd64 only)
         uses: docker/build-push-action@v5
         with:
-          context: .
+          context: ./homesecure
           platforms: linux/amd64
           build-args: BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.19
           push: true
