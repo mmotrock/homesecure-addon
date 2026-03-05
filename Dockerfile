@@ -13,11 +13,12 @@ RUN apk add --no-cache \
     bash
 
 # Install Python packages
-RUN pip3 install --no-cache-dir \
-    bcrypt \
-    zwave-js-server-python \
-    aiohttp \
-    pyyaml
+RUN apk add --no-cache gcc musl-dev libffi-dev && \
+    pip3 install --no-cache-dir \
+        bcrypt \
+        zwave-js-server-python \
+        aiohttp \
+        pyyaml
 
 # Copy root filesystem
 COPY rootfs /
