@@ -3,22 +3,29 @@ FROM ${BUILD_FROM}
 
 ENV LANG=C.UTF-8
 
-# Install requirements
+# Install system requirements + build deps needed to compile Python packages
 RUN apk add --no-cache \
     python3 \
     py3-pip \
     sqlite \
     nginx \
     jq \
-    bash
+    bash \
+    gcc \
+    musl-dev \
+    libffi-dev \
+    python3-dev \
+    cargo \
+    openssl-dev
 
 # Install Python packages
-RUN apk add --no-cache gcc musl-dev libffi-dev && \
-    pip3 install --no-cache-dir \
-        bcrypt \
-        zwave-js-server-python \
-        aiohttp \
-        pyyaml
+# bcrypt needs cargo/rust on Alpine for its Rust-based cryptography backend
+# aiohttp needs gcc/musl-dev
+RUN pip3 install --no-cache-dir \
+    bcrypt \
+    zwave-js-server-python \
+    aiohttp \
+    pyyaml
 
 # Copy root filesystem
 COPY rootfs /
