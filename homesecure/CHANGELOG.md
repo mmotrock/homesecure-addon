@@ -18,3 +18,7 @@
 - Per-lock user access control
 - Dedicated logging system
 - Ingress web UI
+
+## [1.0.1] - 2026-03-05
+### Fixed
+- Removed invalid static file route in web_interface.py

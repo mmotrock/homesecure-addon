@@ -26,7 +26,6 @@ class HomeSecureWeb:
         self.app.router.add_get('/logs', self.logs_page)
         self.app.router.add_get('/api/logs', self.api_logs)
         self.app.router.add_get('/api/status', self.api_status)
-        self.app.router.add_static('/static', '/app/install/web/static')
     
     async def index(self, request):
         """Main page."""
