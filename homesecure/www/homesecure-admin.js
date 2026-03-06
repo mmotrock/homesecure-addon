@@ -543,6 +543,19 @@ class HomeSecureAdmin extends HTMLElement {
             outline: none;
             border-color: #667eea;
           }
+          .form-input.invalid {
+            border-color: #ef4444;
+            background: rgba(239, 68, 68, 0.05);
+          }
+          .field-error {
+            font-size: 12px;
+            color: #ef4444;
+            margin-top: 4px;
+            display: none;
+          }
+          .field-error.visible {
+            display: block;
+          }
           .form-toggle {
             display: flex;
             align-items: center;
@@ -1842,6 +1855,37 @@ class HomeSecureAdmin extends HTMLElement {
     });
 
     // Form inputs - track changes WITHOUT re-rendering
+    // Live PIN validation on blur
+    const pinInput = this.shadowRoot.getElementById('pin-input');
+    if (pinInput) {
+      pinInput.addEventListener('blur', () => {
+        const val = pinInput.value;
+        this.showFieldError('pin-input', 'pin-error', val.length > 0 && (val.length < 6 || val.length > 8));
+      });
+      pinInput.addEventListener('input', () => {
+        if (pinInput.classList.contains('invalid') && pinInput.value.length >= 6 && pinInput.value.length <= 8) {
+          pinInput.classList.remove('invalid');
+          const err = this.shadowRoot.getElementById('pin-error');
+          if (err) err.classList.remove('visible');
+        }
+      });
+    }
+
+    const lockPinInput = this.shadowRoot.getElementById('lock-pin-input');
+    if (lockPinInput) {
+      lockPinInput.addEventListener('blur', () => {
+        const val = lockPinInput.value;
+        this.showFieldError('lock-pin-input', 'lock-pin-error', val.length > 0 && (val.length < 6 || val.length > 8));
+      });
+      lockPinInput.addEventListener('input', () => {
+        if (lockPinInput.classList.contains('invalid') && lockPinInput.value.length >= 6 && lockPinInput.value.length <= 8) {
+          lockPinInput.classList.remove('invalid');
+          const err = this.shadowRoot.getElementById('lock-pin-error');
+          if (err) err.classList.remove('visible');
+        }
+      });
+    }
+
     this.shadowRoot.querySelectorAll('.form-input').forEach(el => {
       el.addEventListener('input', (e) => {
         const field = e.target.dataset.field;
@@ -2362,28 +2406,50 @@ class HomeSecureAdmin extends HTMLElement {
     }
   }
 
+  showFieldError(fieldId, errorId, condition) {
+    const field = this.shadowRoot.getElementById(fieldId);
+    const error = this.shadowRoot.getElementById(errorId);
+    if (field && error) {
+      if (condition) {
+        field.classList.add('invalid');
+        error.classList.add('visible');
+      } else {
+        field.classList.remove('invalid');
+        error.classList.remove('visible');
+      }
+    }
+    return condition;
+  }
+
+  clearFieldErrors() {
+    this.shadowRoot.querySelectorAll('.form-input.invalid').forEach(el => el.classList.remove('invalid'));
+    this.shadowRoot.querySelectorAll('.field-error.visible').forEach(el => el.classList.remove('visible'));
+  }
+
   async createUser() {
-    // Validate required fields
-    if (!this._editingUser.name || !this._editingUser.pin) {
-      this.showNotification('Name and PIN are required', 'error');
-      return;
+    this.clearFieldErrors();
+    let hasErrors = false;
+
+    // Validate name
+    if (!this._editingUser.name) {
+      const nameField = this.shadowRoot.querySelector('[data-field="name"]');
+      if (nameField) nameField.classList.add('invalid');
+      hasErrors = true;
     }
 
-    if (this._editingUser.pin.length < 6 || this._editingUser.pin.length > 8) {
-      this.showNotification('PIN must be 6-8 digits', 'error');
-      return;
+    // Validate alarm PIN
+    if (!this._editingUser.pin || this._editingUser.pin.length < 6 || this._editingUser.pin.length > 8) {
+      if (this.showFieldError('pin-input', 'pin-error', true)) hasErrors = true;
     }
 
-    if (this._editingUser.has_separate_lock_pin && !this._editingUser.lock_pin) {
-      this.showNotification('Lock PIN is required when enabled', 'error');
-      return;
+    // Validate lock PIN if enabled
+    if (this._editingUser.has_separate_lock_pin) {
+      if (!this._editingUser.lock_pin || this._editingUser.lock_pin.length < 6 || this._editingUser.lock_pin.length > 8) {
+        if (this.showFieldError('lock-pin-input', 'lock-pin-error', true)) hasErrors = true;
+      }
     }
 
-    if (this._editingUser.has_separate_lock_pin && this._editingUser.lock_pin && 
-        (this._editingUser.lock_pin.length < 6 || this._editingUser.lock_pin.length > 8)) {
-      this.showNotification('Lock PIN must be 6-8 digits', 'error');
-      return;
-    }
+    if (hasErrors) return;
 
     try {
       console.log('Creating user with data:', {

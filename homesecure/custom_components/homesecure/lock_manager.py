@@ -121,8 +121,8 @@ class LockManager:
                 _LOGGER.info("Driver ready event received!")
                 driver_ready.set()
             
-            # Listen for driver ready
-            self._zwave_client.register_on_driver_ready(on_driver_ready)
+            # Listen for driver ready event using the correct API
+            self._zwave_client.driver_events.on("driver ready", lambda: on_driver_ready(None))
             
             # Wait up to 30 seconds for driver ready event
             try:
@@ -361,21 +361,33 @@ class LockManager:
         
         try:
             if enabled:
+                # Try PIN cache first
                 pin = self._pin_cache.get(user_id)
+
+                # Try retrieving from any other managed lock
                 if not pin:
                     for other_lock in self._managed_locks:
                         if other_lock != lock_entity_id:
                             pin = await self.get_user_pin_from_lock(user_id, other_lock)
                             if pin:
+                                _LOGGER.debug(f"Retrieved PIN for user {user_id} from {other_lock}")
                                 break
-                
+
+                # Last resort: try the target lock itself (re-read)
                 if not pin:
+                    pin = await self.get_user_pin_from_lock(user_id, lock_entity_id)
+
+                if not pin:
+                    _LOGGER.warning(
+                        f"No PIN available for user {user_id} on {lock_entity_id}. "
+                        f"User must be re-added with a PIN to sync to this lock."
+                    )
                     await self.hass.async_add_executor_job(
                         self.database.update_lock_sync_status,
                         user_id,
                         lock_entity_id,
                         False,
-                        "No PIN available"
+                        "No PIN available - user must be re-saved with PIN"
                     )
                     return
                 
@@ -583,34 +595,52 @@ class LockManager:
                 "total_new": len(new_locks)
             }
     
-    async def _set_lock_code(self, lock_entity_id: str, slot: int, 
+    def _get_userid_status_value(self, node: ZwaveNode, slot: int) -> Optional[ZwaveValue]:
+        """Get the userIdStatus value for a specific slot."""
+        for value in node.values.values():
+            if (value.command_class == CommandClass.USER_CODE and
+                value.property_ == "userIdStatus" and
+                value.property_key == slot):
+                return value
+        return None
+
+    async def _set_lock_code(self, lock_entity_id: str, slot: int,
                             name: str, pin: str) -> bool:
-        """Set a user code on a Z-Wave JS lock."""
-        _LOGGER.warning(f"=== SET_LOCK_CODE DEBUG START ===")
-        _LOGGER.warning(f"Lock: {lock_entity_id}, Slot: {slot}, Name: {name}, PIN length: {len(pin)}")
+        """Set a user code on a Z-Wave JS lock.
         
+        Z-Wave USER_CODE command class requires setting both the userIdStatus
+        (to 1=enabled) AND the userCode value. Setting just the code string
+        is not enough on most locks.
+        """
+        _LOGGER.info(f"Setting lock code: {lock_entity_id}, slot {slot}, name: {name}, PIN length: {len(pin)}")
+
         try:
             node = self._get_node_from_entity(lock_entity_id)
             if not node:
-                _LOGGER.error(f"✗ No Z-Wave node found for {lock_entity_id}")
+                _LOGGER.error(f"No Z-Wave node found for {lock_entity_id}")
                 return False
-            
-            _LOGGER.warning(f"✓ Found node {node.node_id}")
-            
+
+            # Set userIdStatus to 1 (enabled) first
+            status_value = self._get_userid_status_value(node, slot)
+            if status_value:
+                try:
+                    await node.async_set_value(status_value.value_id, 1)
+                    _LOGGER.debug(f"Set userIdStatus=1 for slot {slot} on {lock_entity_id}")
+                except Exception as e:
+                    _LOGGER.warning(f"Could not set userIdStatus for slot {slot}: {e}")
+
+            # Set the user code
             usercode_value = self._get_usercode_value(node, slot)
             if not usercode_value:
-                _LOGGER.error(f"✗ No usercode value found for slot {slot}")
+                _LOGGER.error(f"No usercode value found for slot {slot} on {lock_entity_id}")
                 return False
-            
-            _LOGGER.warning(f"✓ Found usercode value for slot {slot}")
-            
-            await node.async_set_value(usercode_value, pin)
-            
-            _LOGGER.warning(f"✓ Successfully set lock code")
+
+            await node.async_set_value(usercode_value.value_id, pin)
+            _LOGGER.info(f"Successfully set lock code for {name} in slot {slot} on {lock_entity_id}")
             return True
-            
+
         except Exception as e:
-            _LOGGER.error(f"✗ Failed to set lock code: {type(e).__name__}: {str(e)}")
+            _LOGGER.error(f"Failed to set lock code on {lock_entity_id} slot {slot}: {type(e).__name__}: {str(e)}")
             return False
     
     async def _clear_lock_code(self, lock_entity_id: str, slot: int) -> bool:
@@ -619,16 +649,24 @@ class LockManager:
             node = self._get_node_from_entity(lock_entity_id)
             if not node:
                 return False
-            
+
+            # Set userIdStatus to 0 (disabled/available) first
+            status_value = self._get_userid_status_value(node, slot)
+            if status_value:
+                try:
+                    await node.async_set_value(status_value.value_id, 0)
+                except Exception as e:
+                    _LOGGER.warning(f"Could not clear userIdStatus for slot {slot}: {e}")
+
+            # Clear the user code
             usercode_value = self._get_usercode_value(node, slot)
             if not usercode_value:
                 return False
-            
-            await node.async_set_value(usercode_value, "")
-            
+
+            await node.async_set_value(usercode_value.value_id, "")
             _LOGGER.debug(f"Cleared slot {slot} on {lock_entity_id}")
             return True
-            
+
         except Exception as e:
             _LOGGER.debug(f"Failed to clear lock code slot {slot}: {e}")
             return False

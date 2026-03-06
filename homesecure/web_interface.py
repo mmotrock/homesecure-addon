@@ -26,6 +26,13 @@ class HomeSecureWeb:
         self.app.router.add_get('/logs', self.logs_page)
         self.app.router.add_get('/api/logs', self.api_logs)
         self.app.router.add_get('/api/status', self.api_status)
+        self.app.middlewares.append(self.ingress_middleware)
+
+    @web.middleware
+    async def ingress_middleware(self, request, handler):
+        """Strip ingress path prefix so routes always match."""
+        return await handler(request)
+
     
     async def index(self, request):
         """Main page."""
@@ -136,7 +143,7 @@ class HomeSecureWeb:
             <span class="shield">🛡️</span>
             HomeSecure Management
         </h1>
-        <p class="subtitle">Add-on Version 1.0.2</p>
+        <p class="subtitle">Add-on Version 1.0.0</p>
         
         <div class="card">
             <h2>System Status</h2>
@@ -157,7 +164,7 @@ class HomeSecureWeb:
         <div class="card">
             <h2>Quick Actions</h2>
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <a href="/logs" class="btn">📋 View Logs</a>
+                <a href="logs" class="btn">📋 View Logs</a>
                 <a href="#" class="btn" onclick="openHA(); return false;">⚙️ Configure Integration</a>
                 <a href="#" class="btn" onclick="restartHA(); return false;">🔄 Restart Home Assistant</a>
             </div>
@@ -189,7 +196,7 @@ class HomeSecureWeb:
     <script>
         async function checkStatus() {
             try {
-                const response = await fetch('/api/status');
+                const response = await fetch('api/status');
                 const data = await response.json();
                 
                 // Update integration status
@@ -327,7 +334,7 @@ class HomeSecureWeb:
             const level = document.getElementById('level-filter').value;
             const limit = document.getElementById('limit').value;
             
-            let url = '/api/logs?limit=' + limit;
+            let url = 'api/logs?limit=' + limit;
             if (component) url += '&component=' + component;
             if (level) url += '&level=' + level;
             
