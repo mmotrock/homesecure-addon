@@ -4,13 +4,11 @@ set -e
 CONFIG_PATH=/data/options.json
 
 # Parse configuration
-ADMIN_NAME=$(bashio::config 'admin_name')
-ADMIN_PIN=$(bashio::config 'admin_pin')
 ZWAVE_URL=$(bashio::config 'zwave_server_url')
 LOG_LEVEL=$(bashio::config 'log_level')
 
 bashio::log.info "=========================================="
-bashio::log.info "Starting HomeSecure Add-on v1.0.0"
+bashio::log.info "Starting HomeSecure Add-on v1.0.1"
 bashio::log.info "=========================================="
 
 # Configure logging
@@ -19,7 +17,7 @@ bashio::log.info "Configuring logging (level: ${LOG_LEVEL})..."
 
 # Install integration
 bashio::log.info "Installing HomeSecure integration..."
-/usr/bin/install-integration.sh "${ADMIN_NAME}" "${ADMIN_PIN}" "${ZWAVE_URL}"
+/usr/bin/install-integration.sh "${ZWAVE_URL}"
 
 # Install Lovelace cards
 bashio::log.info "Installing Lovelace cards..."
@@ -53,11 +51,10 @@ bashio::log.info "✓ HomeSecure started successfully!"
 bashio::log.info "=========================================="
 bashio::log.info ""
 bashio::log.info "Next steps:"
-bashio::log.info "1. Restart Home Assistant"
-bashio::log.info "2. Go to Settings → Devices & Services"
-bashio::log.info "3. Click 'Add Integration' and search for 'HomeSecure'"
-bashio::log.info "4. Add Lovelace resources (see warnings above)"
-bashio::log.info "5. Add HomeSecure card to your dashboard"
+bashio::log.info "1. Restart Home Assistant (required to load the integration)"
+bashio::log.info "2. After restart, check notifications for HomeSecure setup prompt"
+bashio::log.info "3. Add Lovelace resources (see warnings above)"
+bashio::log.info "4. Add HomeSecure card to your dashboard"
 bashio::log.info ""
 bashio::log.info "Web UI: Supervisor → HomeSecure → Open Web UI"
 bashio::log.info "=========================================="

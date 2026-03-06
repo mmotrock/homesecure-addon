@@ -27,12 +27,12 @@
 - Fixed web UI "View Logs" link returning 404 error when accessed
   via Home Assistant ingress by converting absolute URLs to relative paths
 - Fixed admin PIN authentication not working due to event names still
-  using old 'secure_alarm_' prefix instead of 'homesecure_' prefix
-- Fixed all remaining event name references migrated from secure_alarm_
+  using old 'homesecure_' prefix instead of 'homesecure_' prefix
+- Fixed all remaining event name references migrated from homesecure_
   to homesecure_ (users_response, user_pin_response, config_response,
   events_response, verify_lock_access_response, etc.)
 - Fixed default entity references updated from
-  alarm_control_panel.secure_alarm to alarm_control_panel.homesecure
+  alarm_control_panel.homesecure to alarm_control_panel.homesecure
 - Fixed Z-Wave lock PIN not being set on locks - set_lock_code now
   correctly sets userIdStatus=1 (enabled) before writing the PIN code,
   which is required by the Z-Wave USER_CODE command class

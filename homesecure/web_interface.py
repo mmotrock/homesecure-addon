@@ -143,7 +143,7 @@ class HomeSecureWeb:
             <span class="shield">🛡️</span>
             HomeSecure Management
         </h1>
-        <p class="subtitle">Add-on Version 1.0.0</p>
+        <p class="subtitle">Add-on Version 1.0.1</p>
         
         <div class="card">
             <h2>System Status</h2>
@@ -408,7 +408,7 @@ class HomeSecureWeb:
         return web.json_response({
             "integration_installed": integration_path.exists(),
             "cards_installed": cards_path.exists(),
-            "version": "1.0.0"
+            "version": "1.0.1"
         })
     
     async def start(self):

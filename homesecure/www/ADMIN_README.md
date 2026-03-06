@@ -13,18 +13,18 @@ A comprehensive administrative interface for managing users, devices, security s
 
 ## Installation
 
-1. Copy `secure-alarm-admin.js` to `/config/www/secure-alarm-admin.js`
+1. Copy `homesecure-admin.js` to `/config/www/homesecure-admin.js`
 2. Add to Lovelace resources:
    - Go to Settings → Dashboards → Resources
    - Click "Add Resource"
-   - URL: `/local/secure-alarm-admin.js`
+   - URL: `/local/homesecure-admin.js`
    - Resource type: `JavaScript Module`
 
 ## Basic Configuration
 
 ```yaml
-type: custom:secure-alarm-admin
-entity: alarm_control_panel.secure_alarm
+type: custom:homesecure-admin
+entity: alarm_control_panel.homesecure
 ```
 
 ## Configuration Options
@@ -33,7 +33,7 @@ entity: alarm_control_panel.secure_alarm
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `entity` | string | **Required.** Entity ID of your secure alarm control panel (e.g., `alarm_control_panel.secure_alarm`) |
+| `entity` | string | **Required.** Entity ID of your secure alarm control panel (e.g., `alarm_control_panel.homesecure`) |
 
 **Note:** The admin panel has minimal configuration - it automatically adapts to your system's users, locks, and settings.
 
@@ -330,7 +330,7 @@ user_lock_access table:
 
 ### Users Not Loading
 - Check database connectivity
-- Verify `secure_alarm.get_users` service exists
+- Verify `homesecure.get_users` service exists
 - Check Home Assistant logs
 - Try reloading integration
 
@@ -359,10 +359,10 @@ The admin panel uses these Home Assistant services:
 ### User Management
 ```yaml
 # Get all users
-service: secure_alarm.get_users
+service: homesecure.get_users
 
 # Add user
-service: secure_alarm.add_user
+service: homesecure.add_user
 data:
   name: "John Doe"
   pin: "123456"
@@ -374,20 +374,20 @@ data:
   lock_pin: "789012"
 
 # Update user
-service: secure_alarm.update_user
+service: homesecure.update_user
 data:
   user_id: 2
   name: "Jane Doe"
   admin_pin: "admin_pin_here"
 
 # Remove user
-service: secure_alarm.remove_user
+service: homesecure.remove_user
 data:
   user_id: 2
   admin_pin: "admin_pin_here"
 
 # Toggle user enabled
-service: secure_alarm.toggle_user_enabled
+service: homesecure.toggle_user_enabled
 data:
   user_id: 2
   enabled: false
@@ -397,7 +397,7 @@ data:
 ### Lock Access
 ```yaml
 # Set lock access
-service: secure_alarm.set_user_lock_access
+service: homesecure.set_user_lock_access
 data:
   user_id: 2
   lock_entity_id: "lock.front_door"
@@ -410,11 +410,11 @@ data:
 ### Authentication
 ```yaml
 # Authenticate admin
-service: secure_alarm.authenticate_admin
+service: homesecure.authenticate_admin
 data:
   pin: "123456"
 
-# Response via event: secure_alarm_auth_result
+# Response via event: homesecure_auth_result
 ```
 
 ## Browser Compatibility
@@ -427,18 +427,59 @@ data:
 
 ## Version History
 
-### 1.0.0
-- Initial release
-- User management (add, edit, delete)
-- Lock access control
-- Enable/disable users
-- Separate lock PINs
-- Admin authentication with lockout
+### 1.0.1
+### Fixed
+- Removed invalid static file route in web_interface.py that caused
+  add-on startup failure (/app/install/web/static did not exist)
+- Fixed web UI "View Logs" link returning 404 error when accessed
+  via Home Assistant ingress by converting absolute URLs to relative paths
+- Fixed admin PIN authentication not working due to event names still
+  using old 'homesecure_' prefix instead of 'homesecure_' prefix
+- Fixed all remaining event name references migrated from homesecure_
+  to homesecure_ (users_response, user_pin_response, config_response,
+  events_response, verify_lock_access_response, etc.)
+- Fixed default entity references updated from
+  alarm_control_panel.homesecure to alarm_control_panel.homesecure
+- Fixed Z-Wave lock PIN not being set on locks - set_lock_code now
+  correctly sets userIdStatus=1 (enabled) before writing the PIN code,
+  which is required by the Z-Wave USER_CODE command class
+- Fixed Z-Wave lock code clearing to also set userIdStatus=0 so slots
+  are properly marked as available after removal
+- Fixed async_set_value calls to use value.value_id string identifier
+  instead of the value object, matching the zwave-js-server-python API
+- Fixed register_on_driver_ready replaced with correct
+  driver_events.on("driver ready") event listener API
+- Fixed PIN retrieval fallback in background lock sync to also attempt
+  re-reading from the target lock itself before giving up, with a
+  clearer log message when no PIN is available
+- Fixed retrieve lock PIN timeout using incorrect event name
+
+### Improved
+- Added inline PIN validation with red field highlighting for alarm PIN
+  and lock PIN fields - fields turn red on blur if length is invalid
+  and clear automatically once corrected
+- PIN validation errors now display as inline messages below the
+  offending field instead of HA persistent notification popups
+- Version number now automatically injected into manifest.json,
+  web_interface.py, and README.md badge during build from config.yaml
+  as single source of truth
+
+### Repository
+- Restructured repository layout to meet Home Assistant add-on store
+  requirements (add-on files moved to homesecure/ subdirectory)
+- Added repository.json to repo root
+- Fixed GitHub Actions workflow paths to reflect new directory structure
+- Fixed build.yaml to contain only HA add-on build configuration
+- Moved GitHub Actions workflow to .github/workflows/build.yml
+- Fixed ghcr.io push permissions by adding packages: write permission
+- Fixed Docker image builds failing due to PEP 668 by using Python
+  virtual environment in Dockerfile
+- Replaced sed-based version injection with Python regex for reliability
 
 ## Support
 
 For issues, feature requests, or contributions:
-- GitHub: https://github.com/mmotrock/ha-secure-alarm
+- GitHub: https://github.com/mmotrock/ha-homesecure
 - Home Assistant Community: [Link to forum thread]
 
 ## License
