@@ -22,3 +22,7 @@
 ## [1.0.1] - 2026-03-05
 ### Fixed
 - Removed invalid static file route in web_interface.py
+
+## [1.0.2] - 2026-03-05
+### Fixed
+- Corrected routes between card and admin pages

@@ -18,7 +18,7 @@ class HomeSecureAdmin extends HTMLElement {
     this._adminPin = null;  // Store authenticated admin PIN
     this._failedAttempts = 0;
     this._lockedUntil = null;
-    this._lockoutKey = 'secure_alarm_admin_lockout';
+    this._lockoutKey = 'homesecure_admin_lockout';
     this._currentView = 'auth'; // auth, main, user-list, user-detail, user-add
     this._currentTab = 'users'; // users, devices, security, general
     this._selectedUser = null;
@@ -46,7 +46,7 @@ class HomeSecureAdmin extends HTMLElement {
 
   static getStubConfig() {
     return {
-      entity: 'alarm_control_panel.secure_alarm'
+      entity: 'alarm_control_panel.homesecure'
     };
   }
 
@@ -138,7 +138,7 @@ class HomeSecureAdmin extends HTMLElement {
           clearTimeout(timeout);
           unsub.then(u => u());
           resolve(event.data.users || []);
-        }, 'secure_alarm_users_response');
+        }, 'homesecure_users_response');
         
         // Call the service
         this._hass.callService('homesecure', 'get_users', {});
@@ -1177,7 +1177,7 @@ class HomeSecureAdmin extends HTMLElement {
           clearTimeout(timeout);
           unsub.then(u => u());
           resolve(event.data.lock_access || {});
-        }, 'secure_alarm_user_lock_access_response');
+        }, 'homesecure_user_lock_access_response');
         
         this._hass.callService('homesecure', 'get_user_lock_access', {
           user_id: userId
@@ -1212,7 +1212,7 @@ class HomeSecureAdmin extends HTMLElement {
           const unsub = this._hass.connection.subscribeEvents((event) => {
             unsub.then(u => u());
             resolve(event.data);
-          }, 'secure_alarm_user_pin_response');
+          }, 'homesecure_user_pin_response');
           
           // Call the service
           this._hass.callService('homesecure', 'get_user_pin', {
@@ -1525,7 +1525,7 @@ class HomeSecureAdmin extends HTMLElement {
           clearTimeout(timeout);
           unsub.then(u => u());
           resolve(event.data.events || []);
-        }, 'secure_alarm_events_response');
+        }, 'homesecure_events_response');
         
         this._hass.callService('homesecure', 'get_events', {
           event_types: eventTypesParam,
@@ -1551,7 +1551,7 @@ class HomeSecureAdmin extends HTMLElement {
           clearTimeout(timeout);
           unsub.then(u => u());
           resolve(event.data.event_types || []);
-        }, 'secure_alarm_event_types_response');
+        }, 'homesecure_event_types_response');
         
         this._hass.callService('homesecure', 'get_event_types', {});
       });
@@ -1572,7 +1572,7 @@ class HomeSecureAdmin extends HTMLElement {
           clearTimeout(timeout);
           unsub.then(u => u());
           resolve(event.data);
-        }, 'secure_alarm_event_stats_response');
+        }, 'homesecure_event_stats_response');
         
         this._hass.callService('homesecure', 'get_event_stats', {
           days: this._eventFilters.days
@@ -1688,7 +1688,7 @@ class HomeSecureAdmin extends HTMLElement {
           clearTimeout(timeout);
           unsub.then(u => u());
           resolve(event.data.config || {});
-        }, 'secure_alarm_config_response');
+        }, 'homesecure_config_response');
         
         this._hass.callService('homesecure', 'get_config', {});
       });
@@ -1938,7 +1938,7 @@ class HomeSecureAdmin extends HTMLElement {
                     unsub.then(u => u());
                     resolve(event.data.result);
                   }
-                }, 'secure_alarm_verify_lock_access_response');
+                }, 'homesecure_verify_lock_access_response');
                 
                 this._hass.callService('homesecure', 'verify_user_lock_access', {
                   user_id: userId
@@ -2101,7 +2101,7 @@ class HomeSecureAdmin extends HTMLElement {
                     unsub.then(u => u());
                     resolve(event.data);
                   }
-                }, 'secure_alarm_user_pin_response');
+                }, 'homesecure_user_pin_response');
                 
                 this._hass.callService('homesecure', 'get_user_pin', {
                   user_id: userId
@@ -2153,7 +2153,7 @@ class HomeSecureAdmin extends HTMLElement {
                     unsub.then(u => u());
                     resolve(event.data);
                   }
-                }, 'secure_alarm_user_pin_response');
+                }, 'homesecure_user_pin_response');
                 
                 this._hass.callService('homesecure', 'get_user_pin', {
                   user_id: userId
@@ -2243,12 +2243,12 @@ class HomeSecureAdmin extends HTMLElement {
         const handleEvent = (event) => {
           console.log('Received auth result event:', event.data);
           clearTimeout(timeout);
-          this._hass.connection.removeEventListener('secure_alarm_auth_result', handleEvent);
+          this._hass.connection.removeEventListener('homesecure_auth_result', handleEvent);
           resolve(event.data);
         };
         
         // Subscribe to event
-        this._hass.connection.subscribeEvents(handleEvent, 'secure_alarm_auth_result');
+        this._hass.connection.subscribeEvents(handleEvent, 'homesecure_auth_result');
       });
       
       // Now call the service
@@ -2446,7 +2446,7 @@ class HomeSecureAdmin extends HTMLElement {
     this._hass.callService('persistent_notification', 'create', {
       title: 'Secure Alarm Admin',
       message: message,
-      notification_id: `secure_alarm_${Date.now()}`
+      notification_id: `homesecure_${Date.now()}`
     });
   }
 }
@@ -2511,7 +2511,7 @@ class HomeSecureAdminEditor extends HTMLElement {
             type="text"
             id="entity"
             value="${this._config.entity || ''}"
-            placeholder="alarm_control_panel.secure_alarm"
+            placeholder="alarm_control_panel.homesecure"
           />
           <div class="help-text">Select your secure alarm control panel entity</div>
         </div>
@@ -2534,8 +2534,8 @@ customElements.define('homesecure-admin-editor', HomeSecureAdminEditor);
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: 'homesecure-admin',
-  name: 'Secure Alarm Admin Panel',
-  description: 'Administrative interface for Secure Alarm System',
+  name: 'HomeSecure Admin Panel',
+  description: 'Administrative interface for HomeSecure System',
   preview: true,
-  documentationURL: 'https://github.com/mmotrock/ha-secure-alarm'
+  documentationURL: 'https://github.com/mmotrock/homesecure-addon'
 });

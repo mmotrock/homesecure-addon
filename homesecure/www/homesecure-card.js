@@ -1,6 +1,6 @@
 /**
- * Secure Alarm Badge Card - Updated with Admin Button and Garage Type Selection
- * Custom Lovelace card for Secure Alarm System
+ * HomeSecure Badge Card - Updated with Admin Button and Garage Type Selection
+ * Custom Lovelace card for HomeSecure System
  * 
  * Installation:
  * 1. Copy to /config/www/homesecure-card.js
@@ -24,7 +24,7 @@ class HomeSecureCard extends HTMLElement {
 
   static getStubConfig() {
     return {
-      entity: 'alarm_control_panel.secure_alarm',
+      entity: 'alarm_control_panel.homesecure',
       entry_points: [],
       card_height: '100%'
     };
@@ -535,16 +535,16 @@ class HomeSecureCard extends HTMLElement {
   }
 
   renderAdmin() {
-    // Check if secure-alarm-admin is defined
-    if (!customElements.get('secure-alarm-admin')) {
-      console.error('secure-alarm-admin custom element not found');
+    // Check if homesecure-admin is defined
+    if (!customElements.get('homesecure-admin')) {
+      console.error('homesecure-admin custom element not found');
       return `
         <ha-card>
           <div style="padding: 20px;">
             <h3>Admin Panel Error</h3>
             <p>The admin panel component is not loaded.</p>
             <p style="font-size: 12px; color: var(--secondary-text-color); margin-top: 12px;">
-              Make sure secure-alarm-admin.js is added to your Lovelace resources.
+              Make sure homesecure-admin.js is added to your Lovelace resources.
             </p>
             <button style="padding: 8px 16px; margin-top: 12px; background: var(--primary-color); color: white; border: none; border-radius: 4px; cursor: pointer;" data-action="close-admin-error">Close</button>
           </div>
@@ -555,7 +555,7 @@ class HomeSecureCard extends HTMLElement {
     // Create admin panel element if it doesn't exist
     if (!this._adminPanel) {
       try {
-        this._adminPanel = document.createElement('secure-alarm-admin');
+        this._adminPanel = document.createElement('homesecure-admin');
         this._adminPanel.setConfig({ entity: this.config.entity });
         this._adminPanel.hass = this._hass;
         this._adminPanel.addEventListener('close-admin', () => {
@@ -1343,8 +1343,8 @@ customElements.define('homesecure-card-editor', HomeSecureCardEditor);
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: 'homesecure-card',
-  name: 'Secure Alarm Badge Card',
+  name: 'HomeSecure Badge Card',
   description: 'Badge-style alarm control with admin panel and entry point management',
   preview: true,
-  documentationURL: 'https://github.com/mmotrock/ha-secure-alarm'
+  documentationURL: 'https://github.com/mmotrock/homesecure-addon'
 });
