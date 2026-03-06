@@ -136,7 +136,7 @@ class HomeSecureWeb:
             <span class="shield">🛡️</span>
             HomeSecure Management
         </h1>
-        <p class="subtitle">Add-on Version 1.0.0</p>
+        <p class="subtitle">Add-on Version 1.0.2</p>
         
         <div class="card">
             <h2>System Status</h2>

@@ -144,6 +144,20 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           echo "Building version $VERSION"
 
+      - name: Inject version into source files
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+
+          # Update manifest.json
+          sed -i "s/\"version\": \"[0-9]*\.[0-9]*\.[0-9]*\"/\"version\": \"$VERSION\"/" homesecure/custom_components/homesecure/manifest.json
+
+          # Update web_interface.py
+          sed -i "s/\"version\": \"[0-9]*\.[0-9]*\.[0-9]*\"/\"version\": \"$VERSION\"/" homesecure/web_interface.py
+
+          echo "Injected version $VERSION into:"
+          grep -n "version" homesecure/custom_components/homesecure/manifest.json
+          grep -n "version" homesecure/web_interface.py
+
       - name: Build and push amd64 image
         uses: docker/build-push-action@v5
         with:

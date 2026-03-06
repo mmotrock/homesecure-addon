@@ -26,3 +26,7 @@
 ## [1.0.2] - 2026-03-05
 ### Fixed
 - Corrected routes between card and admin pages
+
+## [1.0.3] - 2026-03-05
+### Fixed
+- Fixed incorrect versioning throughout
