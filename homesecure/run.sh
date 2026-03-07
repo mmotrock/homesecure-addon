@@ -8,7 +8,7 @@ ZWAVE_URL=$(bashio::config 'zwave_server_url')
 LOG_LEVEL=$(bashio::config 'log_level')
 
 bashio::log.info "=========================================="
-bashio::log.info "Starting HomeSecure Add-on v1.0.1"
+bashio::log.info "Starting HomeSecure Add-on v1.0.2"
 bashio::log.info "=========================================="
 
 # Configure logging

@@ -427,7 +427,7 @@ data:
 
 ## Version History
 
-### 1.0.1
+### 1.0.2
 ### Fixed
 - Removed invalid static file route in web_interface.py that caused
   add-on startup failure (/app/install/web/static did not exist)

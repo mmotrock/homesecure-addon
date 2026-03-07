@@ -1266,12 +1266,14 @@ class HomeSecureAdmin extends HTMLElement {
 
         <div class="form-group">
           <label class="form-label">Name *</label>
-          <input type="text" class="form-input" data-field="name" value="${this._editingUser.name || ''}" placeholder="Enter user name">
+          <input type="text" class="form-input" id="name-input" data-field="name" value="${this._editingUser.name || ''}" placeholder="Enter user name">
+          <div class="field-error" id="name-error">Name is required</div>
         </div>
 
         <div class="form-group">
           <label class="form-label">Alarm PIN (6-8 digits) *</label>
-          <input type="password" class="form-input" data-field="pin" value="${this._editingUser.pin || ''}" placeholder="Enter PIN for arming/disarming">
+          <input type="password" class="form-input" id="pin-input" data-field="pin" value="${this._editingUser.pin || ''}" placeholder="Enter PIN for arming/disarming" minlength="6" maxlength="8">
+          <div class="field-error" id="pin-error">PIN must be 6-8 digits</div>
           <div style="font-size: 12px; color: var(--secondary-text-color); margin-top: 4px;">
             This PIN is used for arming/disarming the alarm system
           </div>
@@ -1311,7 +1313,8 @@ class HomeSecureAdmin extends HTMLElement {
         ${this._editingUser.has_separate_lock_pin ? `
           <div class="form-group">
             <label class="form-label">Lock PIN (6-8 digits) *</label>
-            <input type="password" class="form-input" data-field="lock_pin" value="${this._editingUser.lock_pin || ''}" placeholder="Enter PIN for all door locks">
+            <input type="password" class="form-input" id="lock-pin-input" data-field="lock_pin" value="${this._editingUser.lock_pin || ''}" placeholder="Enter PIN for all door locks" minlength="6" maxlength="8">
+            <div class="field-error" id="lock-pin-error">Lock PIN must be 6-8 digits</div>
             <div style="font-size: 12px; color: var(--secondary-text-color); margin-top: 4px;">
               This PIN will work on all door locks
             </div>
@@ -1855,36 +1858,8 @@ class HomeSecureAdmin extends HTMLElement {
     });
 
     // Form inputs - track changes WITHOUT re-rendering
-    // Live PIN validation on blur
-    const pinInput = this.shadowRoot.getElementById('pin-input');
-    if (pinInput) {
-      pinInput.addEventListener('blur', () => {
-        const val = pinInput.value;
-        this.showFieldError('pin-input', 'pin-error', val.length > 0 && (val.length < 6 || val.length > 8));
-      });
-      pinInput.addEventListener('input', () => {
-        if (pinInput.classList.contains('invalid') && pinInput.value.length >= 6 && pinInput.value.length <= 8) {
-          pinInput.classList.remove('invalid');
-          const err = this.shadowRoot.getElementById('pin-error');
-          if (err) err.classList.remove('visible');
-        }
-      });
-    }
-
-    const lockPinInput = this.shadowRoot.getElementById('lock-pin-input');
-    if (lockPinInput) {
-      lockPinInput.addEventListener('blur', () => {
-        const val = lockPinInput.value;
-        this.showFieldError('lock-pin-input', 'lock-pin-error', val.length > 0 && (val.length < 6 || val.length > 8));
-      });
-      lockPinInput.addEventListener('input', () => {
-        if (lockPinInput.classList.contains('invalid') && lockPinInput.value.length >= 6 && lockPinInput.value.length <= 8) {
-          lockPinInput.classList.remove('invalid');
-          const err = this.shadowRoot.getElementById('lock-pin-error');
-          if (err) err.classList.remove('visible');
-        }
-      });
-    }
+    // Attach live PIN validation - called after every render
+    this.attachPinValidation();
 
     this.shadowRoot.querySelectorAll('.form-input').forEach(el => {
       el.addEventListener('input', (e) => {
@@ -2406,6 +2381,27 @@ class HomeSecureAdmin extends HTMLElement {
     }
   }
 
+  attachPinValidation() {
+    const addValidation = (inputId, errorId, minLen, maxLen) => {
+      const input = this.shadowRoot.getElementById(inputId);
+      if (!input) return;
+      input.addEventListener('blur', () => {
+        const val = input.value;
+        this.showFieldError(inputId, errorId, val.length > 0 && (val.length < minLen || val.length > maxLen));
+      });
+      input.addEventListener('input', () => {
+        const val = input.value;
+        if (input.classList.contains('invalid') && val.length >= minLen && val.length <= maxLen) {
+          input.classList.remove('invalid');
+          const err = this.shadowRoot.getElementById(errorId);
+          if (err) err.classList.remove('visible');
+        }
+      });
+    };
+    addValidation('pin-input', 'pin-error', 6, 8);
+    addValidation('lock-pin-input', 'lock-pin-error', 6, 8);
+  }
+
   showFieldError(fieldId, errorId, condition) {
     const field = this.shadowRoot.getElementById(fieldId);
     const error = this.shadowRoot.getElementById(errorId);
@@ -2432,9 +2428,7 @@ class HomeSecureAdmin extends HTMLElement {
 
     // Validate name
     if (!this._editingUser.name) {
-      const nameField = this.shadowRoot.querySelector('[data-field="name"]');
-      if (nameField) nameField.classList.add('invalid');
-      hasErrors = true;
+      if (this.showFieldError('name-input', 'name-error', true)) hasErrors = true;
     }
 
     // Validate alarm PIN

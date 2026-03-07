@@ -3,6 +3,7 @@ HomeSecure Integration for Home Assistant
 Custom security system with dedicated authentication and database
 """
 import logging
+import os
 import asyncio
 from datetime import timedelta
 from typing import Optional
@@ -214,8 +215,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = AlarmCoordinator(hass, database, entry.entry_id)
     
     # Initialize lock manager
-    zwave_url = entry.data.get("zwave_server_url", "ws://localhost:3000")
-    #zwave_url = entry.data.get("zwave_server_url", "ws://a0d7b954-zwavejs2mqtt.local.hass.io:3000")
+    # Z-Wave URL is no longer stored in config entry.
+    # Read from addon options via supervisor API, with fallback to default.
+    zwave_url = "ws://a0d7b954-zwavejs2mqtt:3000"
+    try:
+        import aiohttp
+        supervisor_token = os.environ.get("SUPERVISOR_TOKEN")
+        if supervisor_token:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    "http://supervisor/addons/self/options/config",
+                    headers={"Authorization": f"Bearer {supervisor_token}"}
+                ) as resp:
+                    if resp.status == 200:
+                        addon_options = await resp.json()
+                        zwave_url = addon_options.get("data", {}).get(
+                            "zwave_server_url", zwave_url
+                        )
+                        _LOGGER.debug(f"Z-Wave URL from addon config: {zwave_url}")
+    except Exception as e:
+        _LOGGER.warning(f"Could not read Z-Wave URL from addon config, using default: {e}")
     lock_manager = LockManager(hass, database, coordinator, zwave_url)
     await lock_manager.async_setup()
     

@@ -68,3 +68,30 @@
 - Fixed Docker image builds failing due to PEP 668 by using Python
   virtual environment in Dockerfile
 - Replaced sed-based version injection with Python regex for reliability
+
+## [1.0.2] - 2026-03-07
+
+### Fixed
+- Fixed PIN validation on new user form not showing inline field errors or
+  red highlighting - the add user form (renderUserAdd) was missing id
+  attributes and error div elements that the validation code required
+- Fixed PIN validation listeners not attaching to the add user form by
+  extracting them into a reusable attachPinValidation() method called
+  after every render, so validation now works on both add and edit forms
+- Fixed name field on new user form not highlighting red when left empty
+- Fixed Z-Wave server URL appearing in both the addon configuration tab
+  and the integration setup flow - URL is now configured in the addon
+  config only and passed to the integration automatically via
+  .addon_config.json, removing it from the integration config flow
+- Fixed notification messages (success/error) going to HA persistent
+  notifications instead of displaying inline in the admin panel
+
+### Improved  
+- Replaced HA persistent notification calls with inline toast messages
+  that appear at the bottom of the admin card, providing immediate
+  feedback without cluttering the HA notification center
+- Integration setup flow simplified - users no longer need to enter the
+  Z-Wave server URL during integration setup as it is read automatically
+  from the addon configuration
+- Z-Wave server URL is now read from addon options via the supervisor API
+  at integration startup, with fallback to default URL if unavailable

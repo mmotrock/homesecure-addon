@@ -21,7 +21,7 @@ bashio::log.info "Copying integration files..."
 cp -r "${SOURCE_PATH}"/* "${INTEGRATION_PATH}/"
 chmod -R 755 "${INTEGRATION_PATH}"
 
-# Store zwave URL for the integration config flow to pick up
+# Write addon config for integration to read Z-Wave URL
 cat > "${INTEGRATION_PATH}/.addon_config.json" <<ADDONEOF
 {
   "zwave_server_url": "${ZWAVE_URL}"

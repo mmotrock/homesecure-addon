@@ -34,8 +34,7 @@ class SecureAlarmConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             admin_name = user_input.get("admin_name")
             admin_pin = user_input.get("admin_pin")
             admin_pin_confirm = user_input.get("admin_pin_confirm")
-            zwave_server_url = user_input.get("zwave_server_url", "ws://a0d7b954-zwavejs2mqtt.local.hass.io:3000")
-            
+
             # Validate PIN
             if len(admin_pin) < 6 or len(admin_pin) > 8:
                 errors["admin_pin"] = "pin_length"
@@ -43,25 +42,22 @@ class SecureAlarmConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["admin_pin_confirm"] = "pin_mismatch"
             elif not admin_pin.isdigit():
                 errors["admin_pin"] = "pin_numeric"
-            
+
             if not errors:
-                # Create entry - INCLUDE zwave_server_url!
                 return self.async_create_entry(
                     title="HomeSecure",
                     data={
                         "admin_name": admin_name,
                         "admin_pin": admin_pin,
-                        "zwave_server_url": zwave_server_url,
                     },
                 )
-        
+
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({
                 vol.Required("admin_name", default="Admin"): cv.string,
                 vol.Required("admin_pin"): cv.string,
                 vol.Required("admin_pin_confirm"): cv.string,
-                vol.Optional("zwave_server_url", default="ws://a0d7b954-zwavejs2mqtt.local.hass.io:3000"): cv.string, 
             }),
             errors=errors,
         )
