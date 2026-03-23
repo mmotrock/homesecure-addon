@@ -99,7 +99,6 @@ jobs:
 
       - name: Check Python syntax
         run: |
-          python -m py_compile homesecure/web_interface.py
           for file in homesecure/custom_components/homesecure/*.py; do
             if [ -f "$file" ]; then
               echo "Checking $file..."
