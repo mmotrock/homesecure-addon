@@ -164,7 +164,6 @@ jobs:
 
           echo "Injected version $VERSION into source files"
           grep "version" homesecure/custom_components/homesecure/manifest.json
-          grep "version" homesecure/web_interface.py
           grep "version" homesecure/README.md
 
       - name: Build and push amd64 image
