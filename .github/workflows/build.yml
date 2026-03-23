@@ -154,14 +154,6 @@ jobs:
           open('homesecure/custom_components/homesecure/manifest.json', 'w').write(content)
           " $VERSION
 
-          # Update web_interface.py
-          python3 -c "
-          import re, sys
-          content = open('homesecure/web_interface.py').read()
-          content = re.sub(r'"version": "[0-9]+\.[0-9]+\.[0-9]+"', f'"version": "{sys.argv[1]}"', content)
-          open('homesecure/web_interface.py', 'w').write(content)
-          " $VERSION
-
           # Update README.md badge
           python3 -c "
           import re, sys
