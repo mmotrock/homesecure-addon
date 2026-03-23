@@ -1,12 +1,12 @@
 /**
- * Secure Alarm Admin Panel
- * Admin interface for Secure Alarm System
- * 
- * Installation:
- * 1. Copy to /config/www/homesecure-admin.js
- * 2. Add to Lovelace resources:
- *    url: /local/homesecure-admin.js
- *    type: module
+ * HomeSecure Admin Panel v2.1
+ * Admin interface — talks directly to the HomeSecure container REST API.
+ * No longer uses HA services for user/lock/config operations.
+ *
+ * Config options:
+ *   entity    - alarm_control_panel entity (for state display)
+ *   api_url   - Container API URL (default: http://localhost:8099)
+ *   api_token - Optional API bearer token
  */
 
 class HomeSecureAdmin extends HTMLElement {
@@ -36,6 +36,7 @@ class HomeSecureAdmin extends HTMLElement {
       days: 7
     };
     this._eventsLoaded = false;
+    this._pendingRequirePin = undefined;  // tracks unsaved toggle state on Security tab
     // Load lockout state from localStorage
     this.loadLockoutState();
   }
@@ -92,6 +93,8 @@ class HomeSecureAdmin extends HTMLElement {
       throw new Error('Please define an entity');
     }
     this.config = config;
+    this._apiUrl = (config.api_url || 'http://localhost:8099').replace(/\/$/, '');
+    this._apiToken = config.api_token || '';
     this.render();
   }
 
@@ -126,25 +129,9 @@ class HomeSecureAdmin extends HTMLElement {
   }
 
   async loadUsers() {
-    // Call Home Assistant service to get users
     try {
-      // Subscribe to the response event
-      const users = await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error('Timeout loading users'));
-        }, 5000);
-        
-        const unsub = this._hass.connection.subscribeEvents((event) => {
-          clearTimeout(timeout);
-          unsub.then(u => u());
-          resolve(event.data.users || []);
-        }, 'homesecure_users_response');
-        
-        // Call the service
-        this._hass.callService('homesecure', 'get_users', {});
-      });
-      
-      this._users = users.map(u => ({
+      const data = await this._apiFetch('/api/users');
+      this._users = (data.users || []).map(u => ({
         ...u,
         is_admin: Boolean(u.is_admin),
         enabled: Boolean(u.enabled !== 0),
@@ -152,11 +139,9 @@ class HomeSecureAdmin extends HTMLElement {
         lock_pin_display: u.has_separate_lock_pin ? '••••••' : '',
         slot_number: u.slot_number || null
       }));
-      
-      console.log('Loaded users from database:', this._users);
+      console.log('Loaded users:', this._users.length);
     } catch (e) {
       console.error('Failed to load users:', e);
-      // Use empty array on error
       this._users = [];
     }
   }
@@ -1104,14 +1089,17 @@ class HomeSecureAdmin extends HTMLElement {
   }
 
   renderLockAccessList(user) {
-    // Get all lock entities (only domain 'lock')
-    const allLocks = Object.keys(this._hass.states)
-      .filter(id => id.startsWith('lock.'))
-      .map(id => ({
-        entity_id: id,
-        name: this._hass.states[id].attributes.friendly_name || id,
-        state: this._hass.states[id].state
-      }));
+    // Get locks from container-cached list (populated by loadLocks())
+    // Falls back to reading lock.* from HA states if container list not yet loaded
+    const allLocks = (this._locks || []).length > 0
+      ? this._locks
+      : Object.keys(this._hass.states)
+          .filter(id => id.startsWith('lock.'))
+          .map(id => ({
+            entity_id: id,
+            name: this._hass.states[id].attributes.friendly_name || id,
+            state: this._hass.states[id].state
+          }));
 
     if (allLocks.length === 0) {
       return `<div style="color: var(--secondary-text-color); font-size: 13px; padding: 12px; background: var(--card-background-color); border-radius: 8px;">No locks found in your system.</div>`;
@@ -1179,26 +1167,12 @@ class HomeSecureAdmin extends HTMLElement {
 
   async loadUserLockAccess(userId) {
     if (!this._selectedUser || this._selectedUser.id !== userId) return;
-    
     this._selectedUser._lockAccessLoading = true;
-    
     try {
-      const lockAccess = await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('Timeout')), 5000);
-        
-        const unsub = this._hass.connection.subscribeEvents((event) => {
-          clearTimeout(timeout);
-          unsub.then(u => u());
-          resolve(event.data.lock_access || {});
-        }, 'homesecure_user_lock_access_response');
-        
-        this._hass.callService('homesecure', 'get_user_lock_access', {
-          user_id: userId
-        }).catch(reject);
-      });
-      
+      const data = await this._apiFetch(`/api/locks/users/${userId}`);
+      // data.lock_access is an object keyed by entity_id
       if (this._selectedUser && this._selectedUser.id === userId) {
-        this._selectedUser._lockAccess = lockAccess;
+        this._selectedUser._lockAccess = data.lock_access || {};
         this._selectedUser._lockAccessLoading = false;
         this.render();
       }
@@ -1213,44 +1187,13 @@ class HomeSecureAdmin extends HTMLElement {
   }
 
   async loadUserPin(userId) {
-    if (!this._selectedUser || this._selectedUser.id !== userId) return;
-    
-    this._selectedUser._pinLoading = true;
-    this._selectedUser._pinFailed = false;
-    this.render();
-    
-    try {
-      const pinData = await Promise.race([
-        new Promise((resolve, reject) => {
-          const unsub = this._hass.connection.subscribeEvents((event) => {
-            unsub.then(u => u());
-            resolve(event.data);
-          }, 'homesecure_user_pin_response');
-          
-          // Call the service
-          this._hass.callService('homesecure', 'get_user_pin', {
-            user_id: userId
-          }).catch(reject);
-        }),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Timeout')), 8000) // 8 second timeout
-        )
-      ]);
-      
-      if (this._selectedUser && this._selectedUser.id === userId) {
-        this._selectedUser._actualPin = pinData.pin || '';
-        this._selectedUser._pinLoading = false;
-        this._selectedUser._pinFailed = !pinData.pin;
-        this.render();
-      }
-    } catch (e) {
-      console.error('Failed to load PIN:', e);
-      if (this._selectedUser && this._selectedUser.id === userId) {
-        this._selectedUser._pinLoading = false;
-        this._selectedUser._pinFailed = true;
-        this._selectedUser._actualPin = '';
-        this.render();
-      }
+    // PINs are bcrypt-hashed in the container database and cannot be retrieved.
+    // This method is intentionally a no-op in v2.0.
+    console.log('loadUserPin: PIN retrieval not supported (bcrypt hashed)');
+    if (this._selectedUser && this._selectedUser.id === userId) {
+      this._selectedUser._pinLoading = false;
+      this._selectedUser._pinFailed = true;
+      this._selectedUser._actualPin = '';
     }
   }
 
@@ -1530,27 +1473,11 @@ class HomeSecureAdmin extends HTMLElement {
 
   async loadEvents() {
     try {
-      const eventTypesParam = this._eventFilters.eventTypes.length > 0 
-        ? this._eventFilters.eventTypes.join(',') 
-        : undefined;
-      
-      const events = await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('Timeout')), 5000);
-        
-        const unsub = this._hass.connection.subscribeEvents((event) => {
-          clearTimeout(timeout);
-          unsub.then(u => u());
-          resolve(event.data.events || []);
-        }, 'homesecure_events_response');
-        
-        this._hass.callService('homesecure', 'get_events', {
-          event_types: eventTypesParam,
-          days: this._eventFilters.days,
-          limit: 100
-        });
-      });
-      
-      this._events = events;
+      const params = new URLSearchParams({ limit: 100, days: this._eventFilters.days });
+      if (this._eventFilters.eventTypes.length > 0)
+        params.set('event_types', this._eventFilters.eventTypes.join(','));
+      const data = await this._apiFetch(`/api/logs?${params}`);
+      this._events = data.events || data || [];
       this.render();
     } catch (e) {
       console.error('Failed to load events:', e);
@@ -1560,19 +1487,9 @@ class HomeSecureAdmin extends HTMLElement {
 
   async loadEventTypes() {
     try {
-      const types = await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('Timeout')), 5000);
-        
-        const unsub = this._hass.connection.subscribeEvents((event) => {
-          clearTimeout(timeout);
-          unsub.then(u => u());
-          resolve(event.data.event_types || []);
-        }, 'homesecure_event_types_response');
-        
-        this._hass.callService('homesecure', 'get_event_types', {});
-      });
-      
-      this._eventTypes = types;
+      const data = await this._apiFetch('/api/logs?limit=500');
+      const events = data.events || data || [];
+      this._eventTypes = [...new Set(events.map(e => e.event_type).filter(Boolean))];
     } catch (e) {
       console.error('Failed to load event types:', e);
       this._eventTypes = [];
@@ -1581,24 +1498,30 @@ class HomeSecureAdmin extends HTMLElement {
 
   async loadEventStats() {
     try {
-      const stats = await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('Timeout')), 5000);
-        
-        const unsub = this._hass.connection.subscribeEvents((event) => {
-          clearTimeout(timeout);
-          unsub.then(u => u());
-          resolve(event.data);
-        }, 'homesecure_event_stats_response');
-        
-        this._hass.callService('homesecure', 'get_event_stats', {
-          days: this._eventFilters.days
-        });
-      });
-      
-      this._eventStats = stats;
+      const params = new URLSearchParams({ limit: 500, days: this._eventFilters.days });
+      const data = await this._apiFetch(`/api/logs?${params}`);
+      const events = data.events || data || [];
+      // Build stats summary from raw events
+      const typeCounts = {};
+      events.forEach(e => { typeCounts[e.event_type] = (typeCounts[e.event_type] || 0) + 1; });
+      this._eventStats = { total: events.length, by_type: typeCounts };
       this.render();
     } catch (e) {
       console.error('Failed to load event stats:', e);
+    }
+  }
+
+  async loadLocks() {
+    try {
+      const data = await this._apiFetch('/api/locks');
+      this._locks = (data.locks || []).map(l => ({
+        entity_id: l.entity_id,
+        name: l.name || l.entity_id,
+        state: l.state || 'unknown'
+      }));
+    } catch (e) {
+      console.error('Failed to load locks:', e);
+      this._locks = [];
     }
   }
 
@@ -1615,101 +1538,291 @@ class HomeSecureAdmin extends HTMLElement {
   }
 
   renderSecurityTab() {
+    if (!this._config && !this._configLoading) {
+      this.loadConfig();
+    }
+    if (this._configLoading) {
+      return `<div style="padding: 40px; text-align: center; color: var(--secondary-text-color);">Loading settings…</div>`;
+    }
+
+    const c = this._config || {};
+    const maxAttempts   = c.max_failed_attempts ?? 5;
+    const lockoutMins   = Math.round((c.lockout_duration ?? 300) / 60);
+    const autoAction    = c.alarm_auto_action ?? 'none';
+    const requirePin    = Boolean(c.require_pin_to_arm);
+
     return `
-      <div class="empty-state">
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
-        </svg>
-        <div class="empty-state-title">Security Settings Coming Soon</div>
-        <div class="empty-state-text">Security settings will be available in a future update</div>
+      <div style="max-width: 800px; margin: 0 auto;">
+        <h3 style="margin-bottom: 8px; color: var(--primary-text-color);">Security Settings</h3>
+        <p style="margin-top: 0; margin-bottom: 28px; font-size: 14px; color: var(--secondary-text-color);">
+          These settings control lockout behaviour, alarm response, and arming restrictions.
+        </p>
+
+        <!-- ── PIN Lockout ───────────────────────────────────────────── -->
+        <div style="background: var(--card-background-color); border: 1px solid var(--divider-color); border-radius: 14px; padding: 24px; margin-bottom: 20px;">
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 18px;">
+            <span style="font-size: 22px;">🔐</span>
+            <div>
+              <div style="font-size: 16px; font-weight: 600; color: var(--primary-text-color);">PIN Lockout</div>
+              <div style="font-size: 13px; color: var(--secondary-text-color);">Limit brute-force attempts on the keypad</div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Failed attempts before lockout</label>
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <input type="number" id="max-failed-attempts" class="form-input"
+                     value="${maxAttempts}" min="3" max="20" style="max-width: 110px;">
+              <span style="color: var(--secondary-text-color); font-size: 14px;">attempts</span>
+            </div>
+            <div style="font-size: 12px; color: var(--secondary-text-color); margin-top: 6px;">
+              After this many wrong PINs the keypad locks out for the duration below. Range: 3–20.
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label">Lockout duration</label>
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <input type="number" id="lockout-duration" class="form-input"
+                     value="${lockoutMins}" min="1" max="60" style="max-width: 110px;">
+              <span style="color: var(--secondary-text-color); font-size: 14px;">minutes</span>
+            </div>
+            <div style="font-size: 12px; color: var(--secondary-text-color); margin-top: 6px;">
+              How long the keypad stays locked after too many failed attempts. Range: 1–60 minutes.
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Post-Alarm Action ─────────────────────────────────────── -->
+        <div style="background: var(--card-background-color); border: 1px solid var(--divider-color); border-radius: 14px; padding: 24px; margin-bottom: 20px;">
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 18px;">
+            <span style="font-size: 22px;">🚨</span>
+            <div>
+              <div style="font-size: 16px; font-weight: 600; color: var(--primary-text-color);">Post-Alarm Behaviour</div>
+              <div style="font-size: 13px; color: var(--secondary-text-color);">What happens automatically after the alarm siren duration ends</div>
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label">After alarm duration expires</label>
+            <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 4px;">
+              ${[
+                { val: 'none',   icon: '🔴', title: 'Stay triggered',
+                  desc: 'Alarm stays active until someone manually disarms it. Best for monitored systems.' },
+                { val: 'disarm', icon: '✅', title: 'Auto-disarm',
+                  desc: 'System disarms itself after the siren finishes. Convenient for self-monitored homes.' },
+                { val: 'rearm',  icon: '🔄', title: 'Auto-rearm',
+                  desc: 'System returns to the armed mode it was in before the alarm. Strongest protection.' },
+              ].map(opt => `
+                <label style="
+                  display: flex; align-items: flex-start; gap: 14px; padding: 14px 16px;
+                  border: 2px solid ${autoAction === opt.val ? '#667eea' : 'var(--divider-color)'};
+                  border-radius: 10px; cursor: pointer;
+                  background: ${autoAction === opt.val ? 'rgba(102,126,234,0.06)' : 'transparent'};
+                  transition: border-color 0.2s, background 0.2s;
+                ">
+                  <input type="radio" name="alarm-auto-action" value="${opt.val}"
+                         ${autoAction === opt.val ? 'checked' : ''}
+                         style="margin-top: 3px; accent-color: #667eea; flex-shrink: 0;">
+                  <div>
+                    <div style="font-size: 14px; font-weight: 600; color: var(--primary-text-color);">
+                      ${opt.icon}&nbsp; ${opt.title}
+                    </div>
+                    <div style="font-size: 12px; color: var(--secondary-text-color); margin-top: 3px;">
+                      ${opt.desc}
+                    </div>
+                  </div>
+                </label>
+              `).join('')}
+            </div>
+            <div style="margin-top: 10px; padding: 10px 14px; background: rgba(245,158,11,0.08);
+                        border-left: 3px solid #f59e0b; border-radius: 6px; font-size: 12px;
+                        color: var(--secondary-text-color); line-height: 1.5;">
+              ⚠️ <strong>Alarm duration</strong> is set in the <em>General</em> tab. This setting
+              controls what happens after that duration — not during the siren.
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Arming Restriction ────────────────────────────────────── -->
+        <div style="background: var(--card-background-color); border: 1px solid var(--divider-color); border-radius: 14px; padding: 24px; margin-bottom: 28px;">
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 18px;">
+            <span style="font-size: 22px;">🛡️</span>
+            <div>
+              <div style="font-size: 16px; font-weight: 600; color: var(--primary-text-color);">Arming Restriction</div>
+              <div style="font-size: 13px; color: var(--secondary-text-color);">Control whether a PIN is required to arm</div>
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 0;">
+            <div class="form-toggle" data-action="toggle-require-pin-to-arm" style="cursor: pointer;">
+              <div>
+                <div class="toggle-label">Require PIN to arm</div>
+                <div style="font-size: 12px; color: var(--secondary-text-color); margin-top: 3px;">
+                  When off, anyone can arm without a PIN. When on, a valid user PIN is always required.
+                </div>
+              </div>
+              <div class="toggle-switch ${requirePin ? 'active' : ''}" id="require-pin-toggle" style="flex-shrink: 0; margin-left: 16px;">
+                <div class="toggle-knob"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end;">
+          <button class="btn btn-primary" data-action="save-security-settings"
+                  style="min-width: 160px; padding: 14px 24px;">
+            Save Security Settings
+          </button>
+        </div>
       </div>
     `;
   }
 
   renderGeneralTab() {
-    // Load config if not already loaded
     if (!this._config && !this._configLoading) {
       this.loadConfig();
     }
+    if (this._configLoading) {
+      return `<div style="padding: 40px; text-align: center; color: var(--secondary-text-color);">Loading settings…</div>`;
+    }
 
-    const config = this._config || {};
-    const lockSyncInterval = config.lock_sync_interval || 3600;
-    const lockSyncMinutes = Math.floor(lockSyncInterval / 60);
-    
+    const c = this._config || {};
+    const entryDelay      = c.entry_delay      ?? 30;
+    const exitDelay       = c.exit_delay       ?? 60;
+    const alarmDuration   = c.alarm_duration   ?? 300;
+    const lockSyncMins    = Math.round((c.lock_sync_interval ?? 3600) / 60);
+    const logRetentionDays = c.log_retention_days ?? 90;
+
     return `
       <div style="max-width: 800px; margin: 0 auto;">
-        <h3 style="margin-bottom: 24px; color: var(--primary-text-color);">General Settings</h3>
-        
-        <div class="form-group" style="margin-bottom: 32px;">
-          <label class="form-label">Lock Sync Interval</label>
-          <div style="display: flex; gap: 12px; align-items: center;">
-            <input type="number" 
-                   id="lock-sync-interval" 
-                   class="form-input" 
-                   value="${lockSyncMinutes}" 
-                   min="5" 
-                   max="1440"
-                   style="max-width: 150px;">
-            <span style="color: var(--secondary-text-color);">minutes</span>
-            <button class="btn btn-primary" data-action="save-lock-sync-interval" style="margin-left: auto;">
-              Save Interval
-            </button>
+        <h3 style="margin-bottom: 8px; color: var(--primary-text-color);">General Settings</h3>
+        <p style="margin-top: 0; margin-bottom: 28px; font-size: 14px; color: var(--secondary-text-color);">
+          Alarm timing, lock behaviour, and system maintenance settings.
+        </p>
+
+        <!-- ── Alarm Timing ──────────────────────────────────────────── -->
+        <div style="background: var(--card-background-color); border: 1px solid var(--divider-color); border-radius: 14px; padding: 24px; margin-bottom: 20px;">
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 18px;">
+            <span style="font-size: 22px;">⏱️</span>
+            <div>
+              <div style="font-size: 16px; font-weight: 600; color: var(--primary-text-color);">Alarm Timing</div>
+              <div style="font-size: 13px; color: var(--secondary-text-color);">Delay and duration values for the alarm state machine</div>
+            </div>
           </div>
-          <div style="font-size: 12px; color: var(--secondary-text-color); margin-top: 8px;">
-            How often to verify lock codes match the database. Background sync runs silently.
-            <br>
-            <strong>Recommended:</strong> 60 minutes (1 hour) for most setups
-            <br>
-            Current: ${lockSyncMinutes} minutes (${lockSyncInterval} seconds)
+
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
+
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label">Entry delay</label>
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <input type="number" id="entry-delay" class="form-input"
+                       value="${entryDelay}" min="0" max="300" style="max-width: 110px;">
+                <span style="color: var(--secondary-text-color); font-size: 14px;">seconds</span>
+              </div>
+              <div style="font-size: 12px; color: var(--secondary-text-color); margin-top: 6px;">
+                How long you have to disarm after opening an entry zone. 0 = instant trigger.
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label">Exit delay</label>
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <input type="number" id="exit-delay" class="form-input"
+                       value="${exitDelay}" min="0" max="300" style="max-width: 110px;">
+                <span style="color: var(--secondary-text-color); font-size: 14px;">seconds</span>
+              </div>
+              <div style="font-size: 12px; color: var(--secondary-text-color); margin-top: 6px;">
+                How long you have to leave after arming away before the system is fully armed.
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label">Alarm siren duration</label>
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <input type="number" id="alarm-duration" class="form-input"
+                       value="${alarmDuration}" min="30" max="3600" style="max-width: 110px;">
+                <span style="color: var(--secondary-text-color); font-size: 14px;">seconds</span>
+              </div>
+              <div style="font-size: 12px; color: var(--secondary-text-color); margin-top: 6px;">
+                How long the alarm stays in triggered state before the post-alarm action runs.
+                Min 30 s, max 60 min.
+              </div>
+            </div>
+
+          </div>
+
+          <div style="margin-top: 18px; display: flex; justify-content: flex-end;">
+            <button class="btn btn-primary" data-action="save-timing-settings" style="min-width: 160px;">
+              Save Timing
+            </button>
           </div>
         </div>
 
-        <div style="padding: 16px; background: var(--secondary-background-color); border-radius: 12px; border-left: 4px solid #667eea;">
-          <div style="font-size: 14px; font-weight: 600; color: var(--primary-text-color); margin-bottom: 8px;">
-            ℹ️ About Lock Sync
+        <!-- ── Lock Sync ─────────────────────────────────────────────── -->
+        <div style="background: var(--card-background-color); border: 1px solid var(--divider-color); border-radius: 14px; padding: 24px; margin-bottom: 20px;">
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 18px;">
+            <span style="font-size: 22px;">🔒</span>
+            <div>
+              <div style="font-size: 16px; font-weight: 600; color: var(--primary-text-color);">Lock Sync Interval</div>
+              <div style="font-size: 13px; color: var(--secondary-text-color);">How often to verify Z-Wave lock codes against the database</div>
+            </div>
           </div>
-          <div style="font-size: 13px; color: var(--secondary-text-color); line-height: 1.6;">
-            The periodic sync verifies that lock codes in your Z-Wave locks match the database. 
-            If differences are found (e.g., someone manually changed a code in Z-Wave JS), 
-            the database is automatically updated to match the actual lock state.
-            <br><br>
-            <strong>What it does:</strong>
-            <ul style="margin: 8px 0; padding-left: 20px;">
-              <li>Runs silently in the background every ${lockSyncMinutes} minutes</li>
-              <li>Queries Z-Wave JS for actual lock codes</li>
-              <li>Updates database if differences found</li>
-              <li>No notifications unless you click "Verify Status" manually</li>
-            </ul>
-            <br>
-            <strong>Tips:</strong>
-            <ul style="margin: 8px 0; padding-left: 20px;">
-              <li>Shorter intervals (15-30 min) = more accurate but more Z-Wave traffic</li>
-              <li>Longer intervals (2-4 hours) = less traffic but database may be stale</li>
-              <li>Battery-powered locks: use longer intervals to avoid draining battery</li>
-            </ul>
+
+          <div class="form-group" style="margin-bottom: 4px;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <input type="number" id="lock-sync-interval" class="form-input"
+                     value="${lockSyncMins}" min="1" max="1440" style="max-width: 110px;">
+              <span style="color: var(--secondary-text-color); font-size: 14px;">minutes</span>
+              <button class="btn btn-primary" data-action="save-lock-sync-interval"
+                      style="margin-left: auto; min-width: 140px;">
+                Save Interval
+              </button>
+            </div>
+            <div style="font-size: 12px; color: var(--secondary-text-color); margin-top: 8px; line-height: 1.6;">
+              Shorter (15–30 min) = more accurate, more Z-Wave traffic.
+              Longer (2–4 h) = less traffic, may be stale. Battery locks: use longer intervals.
+              <br><strong>Current:</strong> ${lockSyncMins} min (${c.lock_sync_interval ?? 3600} s)
+            </div>
           </div>
         </div>
+
+        <!-- ── Log Retention ─────────────────────────────────────────── -->
+        <div style="background: var(--card-background-color); border: 1px solid var(--divider-color); border-radius: 14px; padding: 24px; margin-bottom: 28px;">
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 18px;">
+            <span style="font-size: 22px;">📋</span>
+            <div>
+              <div style="font-size: 16px; font-weight: 600; color: var(--primary-text-color);">Event Log Retention</div>
+              <div style="font-size: 13px; color: var(--secondary-text-color);">How long to keep event history before pruning</div>
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 4px;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <input type="number" id="log-retention-days" class="form-input"
+                     value="${logRetentionDays}" min="7" max="365" style="max-width: 110px;">
+              <span style="color: var(--secondary-text-color); font-size: 14px;">days</span>
+              <button class="btn btn-primary" data-action="save-log-retention"
+                      style="margin-left: auto; min-width: 140px;">
+                Save Retention
+              </button>
+            </div>
+            <div style="font-size: 12px; color: var(--secondary-text-color); margin-top: 8px; line-height: 1.6;">
+              Events older than this are automatically deleted. A maximum of 10,000 events are always kept
+              regardless of age. Range: 7–365 days.
+            </div>
+          </div>
+        </div>
+
       </div>
     `;
   }
 
   async loadConfig() {
     this._configLoading = true;
-    
     try {
-      const config = await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('Timeout')), 5000);
-        
-        const unsub = this._hass.connection.subscribeEvents((event) => {
-          clearTimeout(timeout);
-          unsub.then(u => u());
-          resolve(event.data.config || {});
-        }, 'homesecure_config_response');
-        
-        this._hass.callService('homesecure', 'get_config', {});
-      });
-      
-      this._config = config;
+      const data = await this._apiFetch('/api/config');
+      this._config = data.config || data;
       this._configLoading = false;
       this.render();
     } catch (e) {
@@ -1830,30 +1943,129 @@ class HomeSecureAdmin extends HTMLElement {
       el.addEventListener('click', async () => {
         const input = this.shadowRoot.getElementById('lock-sync-interval');
         if (!input) return;
-        
         const minutes = parseInt(input.value);
-        if (isNaN(minutes) || minutes < 5 || minutes > 1440) {
-          this.showNotification('Please enter a value between 5 and 1440 minutes', 'error');
+        if (isNaN(minutes) || minutes < 1 || minutes > 1440) {
+          this.showNotification('Please enter a value between 1 and 1440 minutes', 'error');
           return;
         }
-        
         const seconds = minutes * 60;
-        
         try {
-          await this._hass.callService('homesecure', 'set_lock_sync_interval', {
-            interval: seconds
-          });
-          
-          // Update local config
-          if (this._config) {
-            this._config.lock_sync_interval = seconds;
-          }
-          
+          await this._apiPost('/api/config', { admin_pin: this._adminPin, lock_sync_interval: seconds });
+          if (this._config) this._config.lock_sync_interval = seconds;
           this.showNotification(`Lock sync interval set to ${minutes} minutes`, 'success');
+          this.render();
         } catch (e) {
           console.error('Failed to set sync interval:', e);
           this.showNotification('Failed to update sync interval', 'error');
         }
+      });
+    });
+
+    // ── Save timing settings (entry/exit/alarm duration) ────────────────
+    this.shadowRoot.querySelectorAll('[data-action="save-timing-settings"]').forEach(el => {
+      el.addEventListener('click', async () => {
+        const entryDelay    = parseInt(this.shadowRoot.getElementById('entry-delay')?.value);
+        const exitDelay     = parseInt(this.shadowRoot.getElementById('exit-delay')?.value);
+        const alarmDuration = parseInt(this.shadowRoot.getElementById('alarm-duration')?.value);
+
+        if (isNaN(entryDelay)    || entryDelay    < 0   || entryDelay    > 300)  return this.showNotification('Entry delay must be 0–300 s', 'error');
+        if (isNaN(exitDelay)     || exitDelay     < 0   || exitDelay     > 300)  return this.showNotification('Exit delay must be 0–300 s', 'error');
+        if (isNaN(alarmDuration) || alarmDuration < 30  || alarmDuration > 3600) return this.showNotification('Alarm duration must be 30–3600 s', 'error');
+
+        try {
+          await this._apiPost('/api/config', {
+            admin_pin:      this._adminPin,
+            entry_delay:    entryDelay,
+            exit_delay:     exitDelay,
+            alarm_duration: alarmDuration,
+          });
+          if (this._config) {
+            this._config.entry_delay    = entryDelay;
+            this._config.exit_delay     = exitDelay;
+            this._config.alarm_duration = alarmDuration;
+          }
+          this.showNotification('Timing settings saved', 'success');
+          this.render();
+        } catch (e) {
+          console.error('Failed to save timing:', e);
+          this.showNotification('Failed to save timing settings', 'error');
+        }
+      });
+    });
+
+    // ── Save log retention ───────────────────────────────────────────────
+    this.shadowRoot.querySelectorAll('[data-action="save-log-retention"]').forEach(el => {
+      el.addEventListener('click', async () => {
+        const input = this.shadowRoot.getElementById('log-retention-days');
+        if (!input) return;
+        const days = parseInt(input.value);
+        if (isNaN(days) || days < 7 || days > 365) {
+          return this.showNotification('Retention must be 7–365 days', 'error');
+        }
+        try {
+          await this._apiPost('/api/config', { admin_pin: this._adminPin, log_retention_days: days });
+          if (this._config) this._config.log_retention_days = days;
+          this.showNotification(`Event log will be kept for ${days} days`, 'success');
+          this.render();
+        } catch (e) {
+          console.error('Failed to save log retention:', e);
+          this.showNotification('Failed to save log retention', 'error');
+        }
+      });
+    });
+
+    // ── Save security settings ───────────────────────────────────────────
+    this.shadowRoot.querySelectorAll('[data-action="save-security-settings"]').forEach(el => {
+      el.addEventListener('click', async () => {
+        const maxAttempts  = parseInt(this.shadowRoot.getElementById('max-failed-attempts')?.value);
+        const lockoutMins  = parseInt(this.shadowRoot.getElementById('lockout-duration')?.value);
+        const autoAction   = this.shadowRoot.querySelector('input[name="alarm-auto-action"]:checked')?.value;
+        const requirePin   = Boolean(this._pendingRequirePin !== undefined
+                               ? this._pendingRequirePin
+                               : this._config?.require_pin_to_arm);
+
+        if (isNaN(maxAttempts) || maxAttempts < 3 || maxAttempts > 20)
+          return this.showNotification('Failed attempts must be 3–20', 'error');
+        if (isNaN(lockoutMins) || lockoutMins < 1 || lockoutMins > 60)
+          return this.showNotification('Lockout duration must be 1–60 minutes', 'error');
+        if (!['none', 'disarm', 'rearm'].includes(autoAction))
+          return this.showNotification('Please select a post-alarm action', 'error');
+
+        try {
+          await this._apiPost('/api/config', {
+            admin_pin:            this._adminPin,
+            max_failed_attempts:  maxAttempts,
+            lockout_duration:     lockoutMins * 60,
+            alarm_auto_action:    autoAction,
+            require_pin_to_arm:   requirePin ? 1 : 0,
+          });
+          if (this._config) {
+            this._config.max_failed_attempts = maxAttempts;
+            this._config.lockout_duration    = lockoutMins * 60;
+            this._config.alarm_auto_action   = autoAction;
+            this._config.require_pin_to_arm  = requirePin ? 1 : 0;
+          }
+          this._pendingRequirePin = undefined;
+          this.showNotification('Security settings saved', 'success');
+          this.render();
+        } catch (e) {
+          console.error('Failed to save security settings:', e);
+          this.showNotification('Failed to save security settings', 'error');
+        }
+      });
+    });
+
+    // ── Toggle: require PIN to arm ───────────────────────────────────────
+    this.shadowRoot.querySelectorAll('[data-action="toggle-require-pin-to-arm"]').forEach(el => {
+      el.addEventListener('click', () => {
+        const toggle = this.shadowRoot.getElementById('require-pin-toggle');
+        if (!toggle) return;
+        const current = this._pendingRequirePin !== undefined
+          ? this._pendingRequirePin
+          : Boolean(this._config?.require_pin_to_arm);
+        this._pendingRequirePin = !current;
+        toggle.classList.toggle('active', this._pendingRequirePin);
+        toggle.querySelector('.toggle-knob'); // force repaint handled by CSS
       });
     });
 
@@ -1904,12 +2116,10 @@ class HomeSecureAdmin extends HTMLElement {
         
         if (user) {
           try {
-            // No admin_pin needed - service will use auto-generated PIN
-            await this._hass.callService('homesecure', 'toggle_user_enabled', {
-              user_id: userId,
+            await this._apiPost(`/api/users/${userId}`, {
+              admin_pin: this._adminPin,
               enabled: !user.enabled
             });
-            
             user.enabled = !user.enabled;
             this.render();
           } catch (e) {
@@ -1951,21 +2161,8 @@ class HomeSecureAdmin extends HTMLElement {
           
           try {
             const result = await Promise.race([
-              new Promise((resolve, reject) => {
-                const unsub = this._hass.connection.subscribeEvents((event) => {
-                  if (event.data.user_id === userId) {
-                    unsub.then(u => u());
-                    resolve(event.data.result);
-                  }
-                }, 'homesecure_verify_lock_access_response');
-                
-                this._hass.callService('homesecure', 'verify_user_lock_access', {
-                  user_id: userId
-                }).catch(reject);
-              }),
-              new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Timeout')), 15000)
-              )
+              this._apiPost('/api/locks/sync', { admin_pin: this._adminPin, user_id: userId }),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 15000))
             ]);
             
             if (this._selectedUser && this._selectedUser.id === userId) {
@@ -2016,19 +2213,13 @@ class HomeSecureAdmin extends HTMLElement {
         const userId = parseInt(el.dataset.userId);
         
         try {
-          await this._hass.callService('homesecure', 'sync_user_to_new_locks', {
-            user_id: userId
-          });
-          
+          await this._apiPost('/api/locks/sync', { admin_pin: this._adminPin, user_id: userId });
           this.showNotification('Syncing to new locks...', 'info');
-          
-          // Reload lock access after sync
           setTimeout(() => {
             if (this._selectedUser && this._selectedUser.id === userId) {
               this.loadUserLockAccess(userId);
             }
           }, 3000);
-          
         } catch (e) {
           console.error('Failed to sync to new locks:', e);
           this.showNotification('Failed to sync to new locks', 'error');
@@ -2062,9 +2253,7 @@ class HomeSecureAdmin extends HTMLElement {
           this.render();
           
           try {
-            // Call service (updates DB immediately, syncs to Z-Wave JS async)
-            await this._hass.callService('homesecure', 'set_user_lock_enabled', {
-              user_id: this._selectedUser.id,
+            await this._apiPost(`/api/locks/users/${this._selectedUser.id}/enable`, {
               lock_entity_id: lockEntityId,
               enabled: !isEnabled
             });
@@ -2104,105 +2293,16 @@ class HomeSecureAdmin extends HTMLElement {
     });
 
     this.shadowRoot.querySelectorAll('[data-action="retrieve-pin"]').forEach(el => {
-      el.addEventListener('click', async () => {
-        const userId = parseInt(el.dataset.userId);
-        
-        if (this._selectedUser && this._selectedUser.id === userId) {
-          this._selectedUser._retrievingPin = true;
-          this._selectedUser._pinRetrieveError = null;
-          this.render();
-          
-          try {
-            const pinData = await Promise.race([
-              new Promise((resolve, reject) => {
-                const unsub = this._hass.connection.subscribeEvents((event) => {
-                  if (event.data.user_id === userId) {
-                    unsub.then(u => u());
-                    resolve(event.data);
-                  }
-                }, 'homesecure_user_pin_response');
-                
-                this._hass.callService('homesecure', 'get_user_pin', {
-                  user_id: userId
-                }).catch(reject);
-              }),
-              new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Timeout')), 8000)
-              )
-            ]);
-            
-            if (this._selectedUser && this._selectedUser.id === userId) {
-              if (pinData.pin) {
-                this._selectedUser._retrievedPin = pinData.pin;
-                this._selectedUser._showPin = true; // Auto-show retrieved PIN
-                this.showNotification('PIN retrieved successfully', 'success');
-              } else {
-                this._selectedUser._pinRetrieveError = 'No PIN found on lock';
-              }
-              this._selectedUser._retrievingPin = false;
-              this.render();
-            }
-          } catch (e) {
-            console.error('Failed to retrieve PIN:', e);
-            if (this._selectedUser && this._selectedUser.id === userId) {
-              this._selectedUser._retrievingPin = false;
-              this._selectedUser._pinRetrieveError = 'Failed to retrieve PIN from lock';
-              this.render();
-            }
-          }
-        }
+      el.addEventListener('click', () => {
+        // PINs are bcrypt-hashed in v2.0 — cannot be retrieved from the container
+        this.showNotification('PIN retrieval is not available — PINs are stored as one-way hashes', 'info');
       });
     });
 
-    // Retrieve LOCK PIN button (for separate lock PIN only)
+    // Retrieve LOCK PIN button
     this.shadowRoot.querySelectorAll('[data-action="retrieve-lock-pin"]').forEach(el => {
-      el.addEventListener('click', async () => {
-        const userId = parseInt(el.dataset.userId);
-        
-        if (this._selectedUser && this._selectedUser.id === userId) {
-          this._selectedUser._retrievingLockPin = true;
-          this._selectedUser._lockPinRetrieveError = null;
-          this.render();
-          
-          try {
-            const pinData = await Promise.race([
-              new Promise((resolve, reject) => {
-                const unsub = this._hass.connection.subscribeEvents((event) => {
-                  if (event.data.user_id === userId) {
-                    unsub.then(u => u());
-                    resolve(event.data);
-                  }
-                }, 'homesecure_user_pin_response');
-                
-                this._hass.callService('homesecure', 'get_user_pin', {
-                  user_id: userId
-                }).catch(reject);
-              }),
-              new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Timeout')), 8000)
-              )
-            ]);
-            
-            if (this._selectedUser && this._selectedUser.id === userId) {
-              if (pinData.pin) {
-                this._selectedUser._retrievedLockPin = pinData.pin;
-                this._selectedUser._showLockPin = true; // Auto-show retrieved PIN
-                this.showNotification('Lock PIN retrieved successfully', 'success');
-              } else {
-                this._selectedUser._lockPinRetrieveError = 'No PIN found on lock';
-              }
-              this._selectedUser._retrievingLockPin = false;
-              this.render();
-            }
-          } catch (e) {
-            console.error('Failed to retrieve lock PIN:', e);
-            if (this._selectedUser && this._selectedUser.id === userId) {
-              this._selectedUser._retrievingLockPin = false;
-              this._selectedUser._lockPinRetrieveError = 'Failed to retrieve PIN from lock';
-              this.render();
-            }
-          }
-        }
+      el.addEventListener('click', () => {
+        this.showNotification('Lock PIN retrieval is not available — PINs are stored as one-way hashes', 'info');
       });
     });
 
@@ -2240,6 +2340,44 @@ class HomeSecureAdmin extends HTMLElement {
     }
   }
 
+  // ── Container API helpers ────────────────────────────────────────────────
+
+  _authHeaders() {
+    const h = { 'Content-Type': 'application/json' };
+    if (this._apiToken) h['Authorization'] = `Bearer ${this._apiToken}`;
+    return h;
+  }
+
+  async _apiFetch(path) {
+    const resp = await fetch(this._apiUrl + path, { headers: this._authHeaders() });
+    if (!resp.ok) throw new Error(`API ${resp.status}: ${await resp.text()}`);
+    return resp.json();
+  }
+
+  async _apiPost(path, body) {
+    const resp = await fetch(this._apiUrl + path, {
+      method: 'POST', headers: this._authHeaders(), body: JSON.stringify(body)
+    });
+    if (!resp.ok) throw new Error(`API ${resp.status}: ${await resp.text()}`);
+    return resp.json();
+  }
+
+  async _apiPut(path, body) {
+    const resp = await fetch(this._apiUrl + path, {
+      method: 'PUT', headers: this._authHeaders(), body: JSON.stringify(body)
+    });
+    if (!resp.ok) throw new Error(`API ${resp.status}: ${await resp.text()}`);
+    return resp.json();
+  }
+
+  async _apiDelete(path, body) {
+    const resp = await fetch(this._apiUrl + path, {
+      method: 'DELETE', headers: this._authHeaders(), body: JSON.stringify(body)
+    });
+    if (!resp.ok) throw new Error(`API ${resp.status}: ${await resp.text()}`);
+    return resp.json();
+  }
+
   disconnectedCallback() {
     // Clean up timer when element is removed
     if (this._lockoutTimer) {
@@ -2250,59 +2388,30 @@ class HomeSecureAdmin extends HTMLElement {
 
   async authenticateAdmin() {
     try {
-      console.log('Authenticating admin, PIN length:', this._pin.length);
-      
-      // Set up event listener FIRST
-      const authPromise = new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          console.error('Authentication timeout');
-          reject(new Error('Authentication timeout'));
-        }, 10000);
-        
-        const handleEvent = (event) => {
-          console.log('Received auth result event:', event.data);
-          clearTimeout(timeout);
-          this._hass.connection.removeEventListener('homesecure_auth_result', handleEvent);
-          resolve(event.data);
-        };
-        
-        // Subscribe to event
-        this._hass.connection.subscribeEvents(handleEvent, 'homesecure_auth_result');
-      });
-      
-      // Now call the service
-      console.log('Calling authenticate_admin service...');
-      await this._hass.callService('homesecure', 'authenticate_admin', {
-        pin: this._pin
-      });
-      
-      // Wait for the event
-      const authResult = await authPromise;
-      console.log('Auth result:', authResult);
-
-      if (authResult && authResult.success && authResult.is_admin) {
-        console.log('✓ Authentication successful:', authResult.user_name);
-        this._authenticated = true;
-        this._usersLoaded = false;
-        this._failedAttempts = 0;
-        this._lockedUntil = null;
-        this._adminPin = this._pin;  // Save the authenticated PIN
-        this._pin = '';
-        this._currentView = 'user-list';
-        this.saveLockoutState();
-        
-        await this.loadUsers();
-        this.render();
+      // POST /api/auth validates the PIN without side effects
+      const data = await this._apiPost('/api/auth', { pin: this._pin });
+      if (!data.success || !data.is_admin) {
+        throw new Error(data.error || 'Not an admin');
       }
+      // If we get here the PIN is valid and admin
+      this._authenticated = true;
+      this._usersLoaded = false;
+      this._failedAttempts = 0;
+      this._lockedUntil = null;
+      this._adminPin = this._pin;
+      this._pin = '';
+      this._currentView = 'user-list';
+      this.saveLockoutState();
+      await this.loadUsers();
+      await this.loadLocks();
+      this.render();
     } catch (e) {
       console.error('Authentication error:', e);
       this._failedAttempts++;
       this._pin = '';
-      
       if (this._failedAttempts >= 5) {
         this._lockedUntil = new Date(Date.now() + 5 * 60 * 1000);
       }
-      
       this.saveLockoutState();
       this.render();
     }
@@ -2310,44 +2419,26 @@ class HomeSecureAdmin extends HTMLElement {
 
   async saveUser() {
     if (!this._selectedUser) return;
-
     try {
-      // Prepare data for service call
-      const userData = {
-        user_id: this._selectedUser.id,
+      const payload = {
+        admin_pin: this._adminPin,
         name: this._selectedUser.name,
         phone: this._selectedUser.phone,
         email: this._selectedUser.email,
         is_admin: this._selectedUser.is_admin,
         has_separate_lock_pin: this._selectedUser.has_separate_lock_pin
-        // No admin_pin needed - service will use auto-generated PIN
       };
+      if (this._selectedUser.pin) payload.pin = this._selectedUser.pin;
+      if (this._selectedUser.has_separate_lock_pin && this._selectedUser.lock_pin)
+        payload.lock_pin = this._selectedUser.lock_pin;
 
-      // Only include PIN if it was changed
-      if (this._selectedUser.pin) {
-        userData.pin = this._selectedUser.pin;
-      }
+      await this._apiPut(`/api/users/${this._selectedUser.id}`, payload);
 
-      // Only include lock PIN if separate lock PIN is enabled and was entered
-      if (this._selectedUser.has_separate_lock_pin && this._selectedUser.lock_pin) {
-        userData.lock_pin = this._selectedUser.lock_pin;
-      }
-
-      // Call Home Assistant service
-      await this._hass.callService('homesecure', 'update_user', userData);
-
-      // Update local users list
       const index = this._users.findIndex(u => u.id === this._selectedUser.id);
-      if (index !== -1) {
-        this._users[index] = {...this._selectedUser};
-      }
-
-      // Go back to list
+      if (index !== -1) this._users[index] = {...this._selectedUser};
       this._currentView = 'user-list';
       this._selectedUser = null;
       this.render();
-
-      // Show success notification
       this.showNotification('User updated successfully', 'success');
     } catch (e) {
       console.error('Failed to save user:', e);
@@ -2356,24 +2447,13 @@ class HomeSecureAdmin extends HTMLElement {
   }
 
   async deleteUser(userId) {
-    if (!confirm('Are you sure you want to delete this user?')) {
-      return;
-    }
-
+    if (!confirm('Are you sure you want to delete this user?')) return;
     try {
-      // No admin_pin needed - service will use auto-generated PIN
-      await this._hass.callService('homesecure', 'remove_user', {
-        user_id: userId
-      });
-
-      // Remove from local list
+      await this._apiDelete(`/api/users/${userId}`, { admin_pin: this._adminPin });
       this._users = this._users.filter(u => u.id !== userId);
-
-      // Go back to list
       this._currentView = 'user-list';
       this._selectedUser = null;
       this.render();
-
       this.showNotification('User deleted successfully', 'success');
     } catch (e) {
       console.error('Failed to delete user:', e);
@@ -2483,10 +2563,7 @@ class HomeSecureAdmin extends HTMLElement {
 
       console.log('Calling add_user service with:', userData);
 
-      await this._hass.callService('homesecure', 'add_user', userData);
-
-      // Reload users from database
-      this._usersLoaded = false;
+      await this._apiPost('/api/users', { ...userData, admin_pin: this._adminPin });
       await this.loadUsers();
 
       // Go back to list
@@ -2502,12 +2579,23 @@ class HomeSecureAdmin extends HTMLElement {
   }
 
   showNotification(message, type = 'info') {
-    // Use Home Assistant's notification system
-    this._hass.callService('persistent_notification', 'create', {
-      title: 'Secure Alarm Admin',
-      message: message,
-      notification_id: `homesecure_${Date.now()}`
-    });
+    // Inline toast notification — no HA service round-trip needed
+    const existing = this.shadowRoot.querySelector('.toast-notification');
+    if (existing) existing.remove();
+
+    const colors = { success: '#10b981', error: '#ef4444', info: '#3b82f6', warning: '#f59e0b' };
+    const toast = document.createElement('div');
+    toast.className = 'toast-notification';
+    toast.style.cssText = `
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      background: ${colors[type] || colors.info}; color: white;
+      padding: 12px 20px; border-radius: 8px; font-size: 14px; font-weight: 500;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 9999;
+      max-width: 90%; text-align: center; pointer-events: none;
+    `;
+    toast.textContent = message;
+    this.shadowRoot.appendChild(toast);
+    setTimeout(() => toast.remove(), 4000);
   }
 }
 

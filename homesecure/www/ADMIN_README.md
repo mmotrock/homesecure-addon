@@ -1,24 +1,25 @@
-# Secure Alarm Admin Panel
+# HomeSecure Admin Panel
 
-A comprehensive administrative interface for managing users, devices, security settings, and system configuration for the Secure Alarm System.
+A comprehensive administrative interface for managing users, lock access, security settings, and system configuration.
 
 ## Features
 
 - **User Management**: Add, edit, disable, and remove users
 - **PIN Management**: Separate PINs for alarm and locks
-- **Lock Access Control**: Per-user permissions for individual locks/garages
-- **Security Features**: Lockout after failed attempts, admin re-authentication
-- **Audit Trail**: Track user activity and changes
+- **Lock Access Control**: Per-user permissions for individual locks
+- **Security**: Lockout after failed attempts, admin re-authentication
+- **Audit Trail**: Track user activity and system events
 - **Responsive Design**: Works on desktop, tablet, and mobile
 
 ## Installation
 
-1. Copy `homesecure-admin.js` to `/config/www/homesecure-admin.js`
-2. Add to Lovelace resources:
-   - Go to Settings → Dashboards → Resources
-   - Click "Add Resource"
-   - URL: `/local/homesecure-admin.js`
-   - Resource type: `JavaScript Module`
+The add-on copies the cards to `/config/www/` automatically on startup. You just need to register them as Lovelace resources:
+
+1. Go to **Settings** → **Dashboards** → **Resources**
+2. Click **Add Resource**
+3. Add `/local/homesecure-card.js` — type: **JavaScript Module**
+4. Add `/local/homesecure-admin.js` — type: **JavaScript Module**
+5. Reload your browser
 
 ## Basic Configuration
 
@@ -29,459 +30,234 @@ entity: alarm_control_panel.homesecure
 
 ## Configuration Options
 
-### Required Parameters
-
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `entity` | string | **Required.** Entity ID of your secure alarm control panel (e.g., `alarm_control_panel.homesecure`) |
+| `entity` | string | **Required.** Entity ID of the alarm control panel |
+| `api_url` | string | Container API URL. Default: `http://localhost:8099` |
+| `api_token` | string | API token if configured in the add-on. Default: none |
 
-**Note:** The admin panel has minimal configuration - it automatically adapts to your system's users, locks, and settings.
+## How the Admin Card Works (v2.1)
+
+In v2.1 the admin card communicates **directly with the HomeSecure container API** (`http://localhost:8099`) rather than going through Home Assistant services. This means:
+
+- Operations are faster (no HA event round-trip)
+- The card works even when HA is reloading
+- No HA services are needed for user/lock management
+
+The alarm state (arm/disarm) still flows through the HA `alarm_control_panel` entity so HA automations and notifications work normally.
 
 ## Features Overview
 
 ### 1. Authentication
 
-#### Security Features
-- **Admin PIN Required**: Must be administrator to access panel
-- **Failed Attempt Tracking**: Tracks incorrect PIN entries
+- **Admin PIN Required**: Must be an administrator to access the panel
+- **Failed Attempt Tracking**: Incorrect PIN entries are counted
 - **Automatic Lockout**: 5 failed attempts = 5-minute lockout
-- **Persistent Lockout**: Lockout persists across browser sessions
-- **Re-authentication**: Required each time panel is opened
+- **Re-authentication**: Required each time the panel is opened
 - **Visual Feedback**: Shows remaining attempts after failures
 
-#### Lockout Behavior
+Lockout behavior:
 ```
-Attempt 1-4: Shows warning with remaining attempts
-Attempt 5: Locks panel for 5 minutes
-Locked: Displays countdown timer
-After 5 min: Automatically unlocks
+Attempts 1–4 : Warning shown with remaining attempts
+Attempt 5    : Panel locked for 5 minutes
+Locked state : Countdown timer displayed
+After 5 min  : Automatically unlocks
 ```
 
 ### 2. User Management
 
-#### User List View
-
-**Display Information:**
+#### User List
 - User avatar with initials
-- User name
-- Admin badge (if applicable)
-- Phone number (if configured)
-- Enabled/Disabled status badge
-- Quick enable/disable toggle
-
-**Actions:**
-- Click user to edit details
-- Toggle enabled/disabled without opening
-- Disabled users are grayed out and can't be edited
+- Name, admin badge, phone number
+- Enabled/Disabled status with quick toggle
+- Click user to open edit view
 
 #### Add New User
 
-**Required Fields:**
-- Name (e.g., "John Smith")
-- PIN (6-8 digits)
+Required:
+- Name
+- PIN (6–8 digits)
 
-**Optional Fields:**
-- Phone number (for notifications)
-- Email address (for notifications)
-- Administrator privileges toggle
-- Separate lock PIN option
-- Lock PIN (6-8 digits, if enabled)
-- Lock/garage access permissions
-
-**Validation:**
-- PIN must be 6-8 digits
-- Lock PIN must be 6-8 digits (if enabled)
-- All fields are validated before submission
-- Admin PIN required to create user
+Optional:
+- Phone number
+- Email address
+- Administrator privileges
+- Separate lock PIN (6–8 digits)
+- Per-lock access toggles
 
 #### Edit Existing User
 
-**Editable Fields:**
-- Name
-- PIN (leave blank to keep existing)
-- Phone number
-- Email address
-- Administrator status
-- Separate lock PIN toggle
-- Lock PIN (shows ••••••, enter new to change)
-- Lock/garage access permissions
-
-**Actions:**
-- Save changes
-- Delete user (with confirmation)
-- Cancel (return to list)
-
-**Security:**
-- Admin PIN required for all changes
-- PIN changes are immediate
-- Deleted users cannot be recovered
+All fields are editable. Leave PIN blank to keep the existing one. Admin PIN is required to save any changes.
 
 #### Disable/Enable Users
 
-**Purpose:**
-- Temporarily revoke access without deleting
-- Useful for temporary workers, guests
-- Preserves user settings and history
-
-**Behavior:**
-- Disabled users cannot authenticate
-- Settings and PINs are preserved
-- Can re-enable at any time
-- Shown in list with "Disabled" badge
+Toggle the switch next to any user in the list to immediately revoke or restore access without deleting the user. Settings and PIN hashes are preserved. Disabled users are removed from all lock slots automatically.
 
 ### 3. Lock Access Control
 
-#### Features
-- Per-user lock/garage permissions
-- Visual toggle for each lock
-- Automatic detection of lock entities
-- Separate from alarm PIN access
+Located in the user edit screen. Each Z-Wave lock discovered by the container is shown with a toggle:
 
-#### Configuration
-Located in user edit screen, below lock PIN field.
-
-**Display:**
 ```
-Determine which locks the user can access
-
-[Front Door Lock]          [Toggle: ON ]
-[Back Door Lock]           [Toggle: OFF]
-[Garage Door]              [Toggle: ON ]
-[Side Gate Lock]           [Toggle: OFF]
+Front Door Lock     [ ON  ]
+Back Door Lock      [ OFF ]
+Garage (if cover)   [ ON  ]
 ```
 
-**Detected Entities:**
-- `lock.*` entities (door locks, smart locks)
-- `cover.*` entities (garage doors, gates)
-
-**No Locks Found:**
-Displays message: "No locks or garage doors found in your system."
-
-#### Access Permissions
-- Each user can have different access
-- Admin users don't automatically have all access
-- Toggle on = user can lock/unlock with their lock PIN
-- Toggle off = user cannot control that lock
+- Toggling on writes the user's code to that lock via Z-Wave JS
+- Toggling off clears the code from that slot
+- Changes update the database immediately and sync to Z-Wave in the background
+- A sync status indicator shows the last sync result
 
 ### 4. PIN Management
 
-#### Alarm PIN
-- Used for arming/disarming the alarm
-- Required for all users
-- 6-8 digits
-- BCrypt hashed in database
+**Alarm PIN**
+- Used for arming/disarming
+- 6–8 digits, bcrypt hashed
 - Cannot be viewed after creation
 
-#### Lock PIN (Optional)
-- Separate from alarm PIN for security
-- Optional per user
-- Used only for locking/unlocking
-- 6-8 digits
-- Shows ••••••when set
-- Enter new PIN to change
+**Lock PIN (optional)**
+- Separate from the alarm PIN
+- Used only for physical lock access
+- Useful for: giving cleaning services lock access without alarm access, or limiting what children can do
 
-**Use Cases for Separate Lock PIN:**
-- Give cleaning service lock access without alarm access
-- Kids can unlock doors but not disarm alarm
-- Different security levels for different actions
+### 5. Settings Tab
 
-### 5. Tab Navigation
+Configure system timing directly from the admin panel:
 
-#### Users Tab
-- User list and management
-- Add, edit, disable, delete users
-- Configure lock access
-- Primary admin function
+- Entry delay (seconds)
+- Exit delay (seconds)
+- Alarm duration (seconds)
+- Auto-lock on arm away/home
+- Lock and garage delays
+- Mobile/SMS notification toggles
 
-#### Devices Tab
-**Coming Soon:** Device management features
-- Zone sensors
-- Keypads
-- Sirens
-- Integration status
+Changes are posted to `/api/config` on the container immediately.
 
-#### Security Tab
-**Coming Soon:** Security settings
-- Failed attempt configuration
-- Lockout duration
-- Duress code settings
-- Audit log viewer
+### 6. Events Tab
 
-#### General Tab
-**Coming Soon:** System settings
-- Entry/exit delays
-- Alarm duration
-- Notification settings
-- System information
+View the recent event log pulled from `/api/logs`:
+
+- State changes (arm/disarm/trigger)
+- Lock/unlock events with user attribution
+- Failed authentication attempts
+- Zone triggers
+- Configuration changes
+
+Filter by event type or date range.
 
 ## User Workflow Examples
 
 ### Adding a Family Member
 
-1. Open admin panel (gear icon)
-2. Enter admin PIN
-3. Click "Add User"
-4. Enter name: "Sarah"
-5. Enter PIN: "123456"
-6. Enter phone: "+15551234567"
-7. Toggle "Separate PIN for Locks": ON
-8. Enter lock PIN: "789012"
-9. Enable "Front Door Lock" access
-10. Enable "Garage Door" access
-11. Click "Create User"
+1. Open admin panel → enter admin PIN
+2. Click **Add User**
+3. Name: `Sarah`, PIN: `234567`
+4. Toggle **Separate PIN for Locks**: ON, Lock PIN: `890123`
+5. Enable **Front Door** and **Garage** access
+6. Click **Create User** — syncs to locks automatically
 
 ### Adding a Cleaning Service
 
-1. Open admin panel
-2. Enter admin PIN
-3. Click "Add User"
-4. Enter name: "Cleaning Service"
-5. Enter PIN: "555555"
-6. Toggle "Separate PIN for Locks": ON
-7. Enter lock PIN: "666666"
-8. Enable "Front Door Lock" only
-9. Leave admin toggle OFF
-10. Click "Create User"
+1. Open admin panel → enter admin PIN
+2. Click **Add User**
+3. Name: `Cleaning Service`, PIN: `555555`
+4. Toggle **Separate PIN for Locks**: ON, Lock PIN: `666666`
+5. Enable **Front Door** only — leave all others OFF
+6. Click **Create User**
 
 ### Temporarily Disabling a User
 
-1. Find user in list
-2. Toggle switch next to user (no need to open)
-3. User immediately loses access
-4. User shows "Disabled" badge
-5. Toggle again to re-enable
+1. Find the user in the list
+2. Toggle the switch next to their name
+3. Access is revoked immediately — lock code is cleared
+4. Toggle again to re-enable and re-sync
 
-### Changing Lock Access
+### Changing Which Locks a User Can Access
 
-1. Click user to edit
-2. Scroll to "Determine which locks the user can access"
-3. Toggle locks on/off as needed
-4. Changes save immediately
-5. Click "Back to Users"
+1. Click user → Edit
+2. Scroll to lock access section
+3. Toggle locks on/off
+4. Changes apply immediately
 
 ## Security Best Practices
 
-### PIN Security
-- Use unique PINs for each user
-- 8 digits more secure than 6
-- Avoid sequential numbers (123456)
-- Avoid repeating numbers (111111)
-- Change PINs periodically
-
-### Lock PIN Strategy
-- Different from alarm PIN
-- Only give to trusted individuals
-- Change when person leaves access
-- Monitor lock usage logs
-
-### User Management
-- Disable users instead of deleting (preserves audit trail)
-- Review user list regularly
-- Remove access immediately when not needed
-- Limit number of admin users
-
-### Admin Access
-- Keep admin PIN private
-- Change admin PIN if compromised
-- Only grant admin to trusted individuals
-- Admin can modify all settings
+- Use unique PINs for each user — avoid sequential or repeating digits
+- 8-digit PINs are stronger than 6-digit
+- Use separate lock PINs for users who should have physical access but not alarm control
+- Disable users promptly when access should end (preserves audit trail vs. deletion)
+- Keep the number of admin users small
+- If your HA instance is externally accessible, set an API token in the add-on configuration
 
 ## Technical Details
 
-### Data Storage
-- User data stored in SQLite database
-- PINs hashed with bcrypt (one-way encryption)
-- Lock access stored in `user_lock_access` table
-- Failed attempts tracked in `failed_attempts` table
-
 ### Authentication Flow
+
 ```
-1. User enters PIN
-2. PIN hashed with bcrypt
-3. Compared to stored hash
-4. Match = authenticated
-5. No match = failed attempt logged
-6. 5 failures = 5-minute lockout
+1. User enters admin PIN in the card
+2. POST /api/users (or other endpoint) with admin_pin in body
+3. Container verifies PIN with bcrypt
+4. Success → operation proceeds
+5. Failure → failed attempt logged, lockout checked
 ```
 
-### Lock Access Storage
-```sql
-user_lock_access table:
-- user_id: User ID
-- lock_entity_id: Entity ID of lock/garage
-- created_at: When access was granted
-```
+### Data Storage
 
-### Lockout Mechanism
-- Failed attempts stored with timestamp
-- Count attempts in last 5 minutes
-- >= 5 attempts = locked out
-- Lockout stored in localStorage
-- Persists across browser restarts
-- Auto-clears after 5 minutes
+All data lives in the container at `/data/homesecure.db` (SQLite):
+
+| Table | Contents |
+|-------|----------|
+| `alarm_users` | Users, bcrypt PIN hashes, contact info |
+| `alarm_config` | Timing + notification settings |
+| `alarm_events` | Full audit log |
+| `user_lock_slots` | Z-Wave slot assignments per user |
+| `user_lock_access` | Per-lock enable/disable state + sync status |
+| `failed_attempts` | Recent failed PIN attempts |
+
+### Container API Endpoints Used by the Card
+
+```
+POST /api/arm_away      { pin }
+POST /api/arm_home      { pin }
+POST /api/disarm        { pin }
+GET  /api/users
+POST /api/users         { name, pin, admin_pin, ... }
+PUT  /api/users/{id}    { admin_pin, name?, pin?, ... }
+DEL  /api/users/{id}    { admin_pin }
+GET  /api/locks
+POST /api/locks/users/{id}/enable  { lock_entity_id, enabled }
+GET  /api/logs
+GET  /api/config
+POST /api/config        { admin_pin, entry_delay, ... }
+WS   /api/ws            real-time state stream
+```
 
 ## Troubleshooting
 
 ### Cannot Access Admin Panel
-- Verify you're using admin PIN
-- Check for lockout (wait 5 minutes)
-- Clear browser cache
-- Check browser console for errors
+- Verify you are using an admin-level PIN
+- Check for lockout — wait 5 minutes or restart the add-on
+- Confirm the container is running (check add-on logs)
 
 ### Users Not Loading
-- Check database connectivity
-- Verify `homesecure.get_users` service exists
-- Check Home Assistant logs
-- Try reloading integration
+- Confirm the container is running: `http://localhost:8099/health`
+- Check the add-on log for database errors
+- Verify the `api_url` card config matches the actual container URL
 
-### Lock Access Not Saving
-- Verify locks exist in Home Assistant
-- Check entity IDs are correct
-- Ensure admin PIN is correct
-- Check browser console for errors
-
-### Visual Editor Not Working
-- Clear browser cache
-- Reload Lovelace resources
-- Check JavaScript console
-- Try manual YAML configuration
+### Lock Sync Not Working
+- Check the add-on log for Z-Wave JS connection errors
+- Verify the `zwave_server_url` in add-on configuration is correct
+- Confirm Z-Wave JS add-on is running and the lock is included
+- Use the **Verify Status** button to check actual lock state vs. database
 
 ### Changes Not Persisting
-- Wait for confirmation message
-- Check database file permissions
-- Review Home Assistant logs
-- Verify service calls succeed
-
-## API / Service Calls
-
-The admin panel uses these Home Assistant services:
-
-### User Management
-```yaml
-# Get all users
-service: homesecure.get_users
-
-# Add user
-service: homesecure.add_user
-data:
-  name: "John Doe"
-  pin: "123456"
-  admin_pin: "admin_pin_here"
-  is_admin: false
-  phone: "+15551234567"
-  email: "john@example.com"
-  has_separate_lock_pin: true
-  lock_pin: "789012"
-
-# Update user
-service: homesecure.update_user
-data:
-  user_id: 2
-  name: "Jane Doe"
-  admin_pin: "admin_pin_here"
-
-# Remove user
-service: homesecure.remove_user
-data:
-  user_id: 2
-  admin_pin: "admin_pin_here"
-
-# Toggle user enabled
-service: homesecure.toggle_user_enabled
-data:
-  user_id: 2
-  enabled: false
-  admin_pin: "admin_pin_here"
-```
-
-### Lock Access
-```yaml
-# Set lock access
-service: homesecure.set_user_lock_access
-data:
-  user_id: 2
-  lock_entity_id: "lock.front_door"
-  can_access: true
-  admin_pin: "admin_pin_here"
-
-# Get user's lock access (automatic with get_users)
-```
-
-### Authentication
-```yaml
-# Authenticate admin
-service: homesecure.authenticate_admin
-data:
-  pin: "123456"
-
-# Response via event: homesecure_auth_result
-```
+- Wait for the confirmation toast message
+- Check the add-on log for API errors
+- Confirm the container has write access to `/data/`
 
 ## Browser Compatibility
 
-- Chrome/Edge: Full support ✓
-- Firefox: Full support ✓
-- Safari: Full support ✓
-- iOS Safari: Full support ✓
-- Chrome Mobile: Full support ✓
-
-## Version History
-
-### 1.0.2
-### Fixed
-- Removed invalid static file route in web_interface.py that caused
-  add-on startup failure (/app/install/web/static did not exist)
-- Fixed web UI "View Logs" link returning 404 error when accessed
-  via Home Assistant ingress by converting absolute URLs to relative paths
-- Fixed admin PIN authentication not working due to event names still
-  using old 'homesecure_' prefix instead of 'homesecure_' prefix
-- Fixed all remaining event name references migrated from homesecure_
-  to homesecure_ (users_response, user_pin_response, config_response,
-  events_response, verify_lock_access_response, etc.)
-- Fixed default entity references updated from
-  alarm_control_panel.homesecure to alarm_control_panel.homesecure
-- Fixed Z-Wave lock PIN not being set on locks - set_lock_code now
-  correctly sets userIdStatus=1 (enabled) before writing the PIN code,
-  which is required by the Z-Wave USER_CODE command class
-- Fixed Z-Wave lock code clearing to also set userIdStatus=0 so slots
-  are properly marked as available after removal
-- Fixed async_set_value calls to use value.value_id string identifier
-  instead of the value object, matching the zwave-js-server-python API
-- Fixed register_on_driver_ready replaced with correct
-  driver_events.on("driver ready") event listener API
-- Fixed PIN retrieval fallback in background lock sync to also attempt
-  re-reading from the target lock itself before giving up, with a
-  clearer log message when no PIN is available
-- Fixed retrieve lock PIN timeout using incorrect event name
-
-### Improved
-- Added inline PIN validation with red field highlighting for alarm PIN
-  and lock PIN fields - fields turn red on blur if length is invalid
-  and clear automatically once corrected
-- PIN validation errors now display as inline messages below the
-  offending field instead of HA persistent notification popups
-- Version number now automatically injected into manifest.json,
-  web_interface.py, and README.md badge during build from config.yaml
-  as single source of truth
-
-### Repository
-- Restructured repository layout to meet Home Assistant add-on store
-  requirements (add-on files moved to homesecure/ subdirectory)
-- Added repository.json to repo root
-- Fixed GitHub Actions workflow paths to reflect new directory structure
-- Fixed build.yaml to contain only HA add-on build configuration
-- Moved GitHub Actions workflow to .github/workflows/build.yml
-- Fixed ghcr.io push permissions by adding packages: write permission
-- Fixed Docker image builds failing due to PEP 668 by using Python
-  virtual environment in Dockerfile
-- Replaced sed-based version injection with Python regex for reliability
-
-## Support
-
-For issues, feature requests, or contributions:
-- GitHub: https://github.com/mmotrock/ha-homesecure
-- Home Assistant Community: [Link to forum thread]
+Chrome/Edge, Firefox, Safari, iOS Safari, Chrome Mobile — all fully supported.
 
 ## License
 
-This admin panel is part of the Secure Alarm System integration for Home Assistant.
+Part of the HomeSecure system for Home Assistant. MIT License.

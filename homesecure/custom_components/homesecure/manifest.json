@@ -5,10 +5,10 @@
   "config_flow": true,
   "documentation": "https://github.com/mmotrock/homesecure",
   "integration_type": "device",
-  "iot_class": "local_polling",
+  "iot_class": "local_push",
   "issue_tracker": "https://github.com/mmotrock/homesecure/issues",
-  "requirements": ["bcrypt>=4.0.0", "zwave-js-server-python"],
-  "version": "1.0.2",
+  "requirements": [],
+  "version": "2.0.0",
   "dependencies": [],
-  "after_dependencies": ["notify"]
+  "after_dependencies": []
 }

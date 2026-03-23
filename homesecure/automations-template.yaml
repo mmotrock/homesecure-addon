@@ -1,0 +1,175 @@
+# HomeSecure v2.1 — Home Assistant Automation Templates
+#
+# In v2.1 the HomeSecure container cannot directly observe HA entity states
+# or call HA services.  These automations bridge that gap:
+#
+#   1. Zone Trigger    — tells the container when a sensor opens while armed
+#   2. Auto-Lock       — locks doors when the alarm is armed
+#   3. Auto-Close      — closes garage doors when the alarm is armed
+#   4. Duress Alert    — sends a notification when a duress code is used
+#
+# HOW TO USE
+# ──────────
+# Copy the automations you need into your HA automations.yaml, or paste
+# them into Settings → Automations → + New Automation → Edit in YAML.
+#
+# Replace every placeholder marked with <ANGLE BRACKETS> with your actual
+# entity IDs and values.
+#
+# The container URL defaults to http://localhost:8099.  If you changed the
+# port or run HA and the add-on on different hosts, update accordingly.
+# If you set an api_token in the add-on config, add it to the headers:
+#   headers:
+#     Authorization: "Bearer <YOUR_TOKEN>"
+#
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+# ── 1. Zone Triggers ──────────────────────────────────────────────────────────
+#
+# One automation per zone sensor.  Fires when the sensor opens/activates.
+# The container handles all the logic: entry delay, bypass check, arm mode, etc.
+# Just notify it that the sensor changed — it does the rest.
+#
+# Duplicate this block for each zone sensor.
+
+- alias: "HomeSecure — Zone Trigger: Front Door"
+  description: "Notify HomeSecure container when front door sensor opens"
+  trigger:
+    - platform: state
+      entity_id: <binary_sensor.front_door>   # ← your zone sensor entity ID
+      to: "on"                                 # "on" = open/active
+  action:
+    - service: rest_command.homesecure_zone_trigger
+      data:
+        entity_id: "<binary_sensor.front_door>"
+        zone_name: "Front Door"
+        state: "on"
+  mode: single
+
+- alias: "HomeSecure — Zone Trigger: Back Door"
+  description: "Notify HomeSecure container when back door sensor opens"
+  trigger:
+    - platform: state
+      entity_id: <binary_sensor.back_door>
+      to: "on"
+  action:
+    - service: rest_command.homesecure_zone_trigger
+      data:
+        entity_id: "<binary_sensor.back_door>"
+        zone_name: "Back Door"
+        state: "on"
+  mode: single
+
+# Add one block per additional zone sensor following the same pattern.
+# Motion sensors use the same format — just change entity_id and zone_name.
+
+
+# ── 2. Auto-Lock on Arm ───────────────────────────────────────────────────────
+#
+# Locks all Z-Wave locks when the alarm is armed away.
+# Uses the HA lock domain — the container manages Z-Wave codes separately.
+#
+# Adjust lock_delay_away to match the exit_delay in your HomeSecure config
+# so doors lock after you've left (not while the exit delay is counting down).
+
+- alias: "HomeSecure — Auto-Lock on Arm Away"
+  description: "Lock all doors when alarm is armed away"
+  trigger:
+    - platform: state
+      entity_id: alarm_control_panel.homesecure
+      to: "armed_away"
+  action:
+    - delay:
+        seconds: <60>                         # ← match your lock_delay_away setting
+    - service: lock.lock
+      target:
+        entity_id:
+          - <lock.front_door>                 # ← your lock entity IDs
+          - <lock.back_door>
+  mode: single
+
+- alias: "HomeSecure — Auto-Lock on Arm Home"
+  description: "Lock all doors when alarm is armed home"
+  trigger:
+    - platform: state
+      entity_id: alarm_control_panel.homesecure
+      to: "armed_home"
+  action:
+    - delay:
+        seconds: <30>                         # ← match your lock_delay_home setting
+    - service: lock.lock
+      target:
+        entity_id:
+          - <lock.front_door>
+          - <lock.back_door>
+  mode: single
+
+
+# ── 3. Auto-Close Garage on Arm ───────────────────────────────────────────────
+
+- alias: "HomeSecure — Auto-Close Garage on Arm Away"
+  description: "Close garage door when alarm is armed away"
+  trigger:
+    - platform: state
+      entity_id: alarm_control_panel.homesecure
+      to: "armed_away"
+  condition:
+    - condition: state
+      entity_id: <cover.garage_door>          # ← only act if it's actually open
+      state: "open"
+  action:
+    - delay:
+        seconds: <60>
+    - service: cover.close_cover
+      target:
+        entity_id: <cover.garage_door>
+  mode: single
+
+
+# ── 4. Duress Alert ───────────────────────────────────────────────────────────
+#
+# The HA integration fires a homesecure_duress_code_used event on the HA bus
+# when a duress PIN is used to disarm.  This automation sends a notification.
+# The alarm disarms normally so no alert is visible to an intruder.
+
+- alias: "HomeSecure — Duress Code Alert"
+  description: "Send silent alert when a duress PIN is used"
+  trigger:
+    - platform: event
+      event_type: homesecure_duress_code_used
+  action:
+    - service: notify.<your_notify_service>   # ← e.g. notify.mobile_app_your_phone
+      data:
+        title: "⚠️ Security Alert"
+        message: >
+          Duress code used by {{ trigger.event.data.user_name }}
+          at {{ now().strftime('%H:%M') }}.
+          Check on the property immediately.
+        data:
+          push:
+            sound: "default"
+            badge: 1
+  mode: single
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# REST COMMAND CONFIGURATION
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Add this block to your configuration.yaml (or rest_command.yaml if split).
+# This defines the rest_command used by the zone trigger automations above.
+#
+# If you set an api_token in the add-on, uncomment the headers section.
+
+# rest_command:
+#   homesecure_zone_trigger:
+#     url: "http://localhost:8099/api/zones/trigger"
+#     method: POST
+#     content_type: "application/json"
+#     payload: >
+#       {"entity_id": "{{ entity_id }}",
+#        "zone_name": "{{ zone_name }}",
+#        "state": "{{ state }}"}
+#     # headers:
+#     #   Authorization: "Bearer <YOUR_API_TOKEN>"

@@ -2,35 +2,29 @@
   "config": {
     "step": {
       "user": {
-        "title": "Set up Secure Alarm System",
-        "description": "Create your administrator account to manage the alarm system.",
+        "title": "Connect to HomeSecure Container",
+        "description": "Enter the URL of the HomeSecure container add-on. The container must be running before you continue.",
         "data": {
-          "admin_name": "Administrator Name",
-          "admin_pin": "Administrator PIN (6-8 digits)",
-          "admin_pin_confirm": "Confirm Administrator PIN"
+          "container_url": "Container URL (e.g. http://localhost:8099)",
+          "api_token": "API Token (leave blank if not configured)"
         }
       }
     },
     "error": {
-      "pin_length": "PIN must be 6-8 digits",
-      "pin_mismatch": "PINs do not match",
-      "pin_numeric": "PIN must contain only numbers",
-      "cannot_connect": "Failed to connect to database",
-      "unknown": "Unexpected error occurred"
+      "cannot_connect": "Cannot reach the HomeSecure container. Make sure the add-on is running and the URL is correct."
     },
     "abort": {
-      "already_configured": "Secure Alarm System is already configured"
+      "already_configured": "HomeSecure is already configured"
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Alarm System Options",
-        "description": "Configure timing and notification settings.",
+        "title": "HomeSecure Options",
+        "description": "Update the container connection settings.",
         "data": {
-          "entry_delay": "Entry Delay (seconds)",
-          "exit_delay": "Exit Delay (seconds)",
-          "alarm_duration": "Alarm Duration (seconds)"
+          "container_url": "Container URL",
+          "api_token": "API Token"
         }
       }
     }

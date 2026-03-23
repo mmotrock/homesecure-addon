@@ -2,7 +2,7 @@
 
 A professional-grade security system for Home Assistant with alarm control, Z-Wave lock integration, multi-user management, and comprehensive event logging.
 
-![Version](https://img.shields.io/badge/version-1.0.2-blue)
+![Version](https://img.shields.io/badge/version-2.1.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.1+-orange)
 
@@ -30,17 +30,15 @@ A professional-grade security system for Home Assistant with alarm control, Z-Wa
 - Phone and email contact information
 
 ### 📊 Logging & Monitoring
-- Dedicated logging system with queryable database
-- Event tracking (arm/disarm, lock/unlock, garage, etc.)
-- Per-component log filtering
-- 30-day log retention
-- Web UI for log viewing
+- Event tracking (arm/disarm, lock/unlock, garage, zone triggers, etc.)
+- Queryable REST API for event history
+- Real-time state updates via WebSocket
+- Web UI log viewer
 
 ### 📱 User Interface
-- Beautiful Lovelace dashboard card
+- Lovelace dashboard card
 - Admin panel for user/lock management
 - Real-time status display
-- Entry point monitoring with battery levels
 - Mobile-responsive design
 
 ### 🚪 Automation
@@ -48,45 +46,110 @@ A professional-grade security system for Home Assistant with alarm control, Z-Wa
 - Auto-close garage doors on arm
 - Configurable delays for locks and garages
 - Mobile and SMS notifications
-- Custom automation triggers
+- Custom automation triggers via HA events
+
+## 🏗️ Architecture
+
+HomeSecure v2.1 uses a container-first architecture. All security logic runs inside the add-on container and exposes a REST/WebSocket API. The HA integration is a thin proxy — it reflects state and forwards commands, but contains no business logic of its own.
+
+```
+┌─────────────────────────────────────────┐
+│         HomeSecure Container            │
+│                                         │
+│  Alarm State Machine  │  REST + WS API  │
+│  User/PIN Database    │  Lock Manager   │
+│  Z-Wave JS Client     │  Event Log      │
+└──────────────┬──────────────────────────┘
+               │ HTTP + WebSocket
+               ▼
+┌─────────────────────────────────────────┐
+│      HA Integration (thin proxy)        │
+│   alarm_control_panel  │  sensors       │
+│   binary_sensors       │  events        │
+└──────────────┬──────────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────────┐
+│       Lovelace Cards (browser)          │
+│   homesecure-card.js                    │
+│   homesecure-admin.js                   │
+└─────────────────────────────────────────┘
+```
+
+### Container API
+
+The container exposes a REST + WebSocket API on port 8099:
+
+```
+GET  /api/state          → current alarm state
+POST /api/arm_away       { "pin": "..." }
+POST /api/arm_home       { "pin": "..." }
+POST /api/disarm         { "pin": "..." }
+GET  /api/users          → list users
+POST /api/users          → add user
+PUT  /api/users/{id}     → update user
+DEL  /api/users/{id}     → remove user
+GET  /api/zones          → list zones
+GET  /api/locks          → lock status
+POST /api/locks/sync     → sync all users to locks
+GET  /api/logs           → recent events
+GET  /api/config         → current config
+POST /api/config         → update config
+WS   /api/ws             → real-time state stream
+GET  /health             → health check
+```
 
 ## 📦 Installation
 
 ### Quick Install
 
 1. **Add Repository to Home Assistant**
-   - Go to **Supervisor** → **Add-on Store** → **⋮** → **Repositories**
-   - Add: `https://bitbucket.org/mmotrock/homesecure-addon`
+   - Go to **Settings** → **Add-ons** → **Add-on Store** → **⋮** → **Repositories**
+   - Add: `https://github.com/mmotrock/homesecure-addon`
    - Click **Add**
 
 2. **Install Add-on**
    - Find **HomeSecure** in the add-on store
-   - Click **Install** (takes 2-5 minutes)
+   - Click **Install** (takes 2-5 minutes to build)
 
-3. **Configure**
-   - Click **Configuration** tab
-   - Set admin name and PIN (6-8 digits)
-   - Set Z-Wave JS Server URL (default usually works)
+3. **Configure Add-on**
+   - Click the **Configuration** tab
+   - Set your Z-Wave JS Server URL (default usually works)
+   - Optionally set an API token for security
    - Click **Save**
 
 4. **Start Add-on**
    - Click **Info** tab → **Start**
    - Enable **Start on boot** and **Watchdog**
 
-5. **Restart Home Assistant**
-   - Settings → System → Restart
-
-6. **Add Integration**
+5. **Add Integration**
    - Settings → Devices & Services → **Add Integration**
-   - Search "HomeSecure"
-   - Enter admin name and PIN from step 3
+   - Search **HomeSecure**
+   - Enter the container URL (default: `http://localhost:8099`)
+   - Enter API token if configured
    - Complete setup
 
-7. **Add Lovelace Cards**
+6. **Add Lovelace Cards**
    - Settings → Dashboards → Resources
    - Add: `/local/homesecure-card.js` (JavaScript Module)
    - Add: `/local/homesecure-admin.js` (JavaScript Module)
-   - Edit dashboard → Add Card → "HomeSecure Card"
+   - Edit dashboard → Add Card → search **HomeSecure**
+
+### Upgrading from v1.x
+
+If you are upgrading from v1.0.x, your existing data is automatically migrated on first startup:
+
+- ✅ All users and bcrypt PIN hashes (no re-enrollment needed)
+- ✅ Alarm configuration (delays, notification settings)
+- ✅ Lock slot assignments
+- ✅ Per-lock access permissions
+- ✅ Last 500 audit events
+
+A backup of the original database is created at `/config/homesecure.db.pre_migration_backup` before migration runs. After migration completes successfully, the container writes a flag file so it never runs again.
+
+**After upgrading:**
+1. Remove and re-add the HomeSecure integration (config flow has changed)
+2. The add-on no longer installs itself into `custom_components/` — install the integration manually from the repository
 
 ## 🎯 Quick Start
 
@@ -94,28 +157,27 @@ A professional-grade security system for Home Assistant with alarm control, Z-Wa
 
 **Arm the System:**
 - Tap the badge on your dashboard
-- Click **Arm Home** or **Arm Away** (no PIN required)
+- Click **Arm Home** or **Arm Away**
 
 **Disarm:**
 - Tap the badge
 - Enter your 6-8 digit PIN
-- Click checkmark
 
 **Admin Panel:**
-- Click the ⚕ button on the alarm card
+- Click the ⚙ button on the alarm card
 - Enter admin PIN
 - Manage users, locks, view events, configure settings
 
 ### Adding Users
 
-1. Open admin panel (⚕ button)
+1. Open admin panel (⚙ button)
 2. Go to **Users** tab
 3. Click **Add User**
 4. Enter name and PIN
 5. Optionally enable separate lock PIN
 6. Click **Create User**
 
-User automatically syncs to all locks!
+User automatically syncs to all Z-Wave locks.
 
 ### Managing Lock Access
 
@@ -123,55 +185,58 @@ User automatically syncs to all locks!
 2. Select a user
 3. Scroll to **Per-Lock Access Control**
 4. Toggle locks on/off for that user
-5. Click **Verify Status** to check actual lock state
 
 ## 🔧 Configuration
 
 ### Add-on Configuration
 
 ```yaml
-admin_name: "Admin"           # Default administrator name
-admin_pin: "123456"           # 6-8 digit admin PIN
-zwave_server_url: "ws://..." # Z-Wave JS Server WebSocket URL
-log_level: "info"             # debug, info, warning, error
+zwave_server_url: "ws://a0d7b954-zwavejs2mqtt:3000"  # Z-Wave JS Server URL
+log_level: "info"                                      # debug|info|warning|error
+api_token: ""                                          # Optional — leave blank to disable
 ```
 
 ### System Configuration
 
-Configure via admin panel or services:
+Configure timing and notification settings via the admin panel or directly against the container API:
 
-```yaml
-service: homesecure.update_config
-data:
-  admin_pin: "123456"
-  entry_delay: 30              # seconds
-  exit_delay: 60               # seconds
-  alarm_duration: 300          # seconds
-  auto_lock_on_arm_away: true
-  lock_delay_away: 60          # seconds
-  auto_close_on_arm_away: true
-  close_delay_away: 60         # seconds
+```bash
+curl -X POST http://localhost:8099/api/config \
+  -H "Content-Type: application/json" \
+  -d '{
+    "admin_pin": "123456",
+    "entry_delay": 30,
+    "exit_delay": 60,
+    "alarm_duration": 300,
+    "auto_lock_on_arm_away": true,
+    "lock_delay_away": 60,
+    "auto_close_on_arm_away": true,
+    "close_delay_away": 60
+  }'
 ```
 
-## 📖 Documentation
+Or from an HA automation using `rest_command`:
 
-- **[Setup Guide](SETUP_FROM_SCRATCH.md)** - Complete build instructions
-- **[Quick Build](QUICK_BUILD.md)** - Fast reference for building
-- **[Troubleshooting](TROUBLESHOOTING.md)** - Common issues and solutions
-- **[File Structure](FILE_STRUCTURE.md)** - Repository layout
-- **[Changelog](CHANGELOG.md)** - Version history
+```yaml
+rest_command:
+  homesecure_update_config:
+    url: "http://localhost:8099/api/config"
+    method: POST
+    content_type: "application/json"
+    payload: '{"admin_pin": "{{ pin }}", "entry_delay": {{ delay }}}'
+```
 
-## 🔌 Services
+## 🔌 HA Services
 
-### Alarm Control
+These HA services are available for use in automations and scripts. All other operations (user management, lock sync, config) are performed directly against the container REST API.
 
 ```yaml
 # Arm Away
 service: homesecure.arm_away
 data:
-  pin: "123456"
+  pin: "123456"          # optional — uses internal service PIN if omitted
 
-# Arm Home  
+# Arm Home
 service: homesecure.arm_home
 data:
   pin: "123456"
@@ -179,196 +244,51 @@ data:
 # Disarm
 service: homesecure.disarm
 data:
-  pin: "123456"
-```
-
-### User Management
-
-```yaml
-# Add User
-service: homesecure.add_user
-data:
-  name: "John Doe"
-  pin: "654321"
-  admin_pin: "123456"
-  is_admin: false
-  has_separate_lock_pin: true
-  lock_pin: "111111"
-
-# Update User
-service: homesecure.update_user
-data:
-  user_id: 2
-  name: "Jane Doe"
-  phone: "+15551234567"
-  admin_pin: "123456"
-
-# Remove User
-service: homesecure.remove_user
-data:
-  user_id: 2
-  admin_pin: "123456"
-```
-
-### Lock Management
-
-```yaml
-# Verify Lock Access
-service: homesecure.verify_user_lock_access
-data:
-  user_id: 2
-
-# Sync to New Locks
-service: homesecure.sync_user_to_new_locks
-data:
-  user_id: 2
-
-# Get User PIN from Lock
-service: homesecure.get_user_pin
-data:
-  user_id: 2
-```
-
-## 🏗️ Architecture
-
-### Components
-
-**Add-on Container:**
-- Runs independently of Home Assistant
-- Installs integration and cards automatically
-- Provides web management interface
-- Aggregates logs to database
-- Manages lock synchronization
-
-**Home Assistant Integration:**
-- Alarm control panel entity
-- Sensors and binary sensors
-- Service calls for all functions
-- State management and coordination
-- Event logging
-
-**Lovelace Cards:**
-- Main alarm control card
-- Admin management panel
-- Real-time status updates
-- User and lock management
-
-### Data Flow
-
-```
-User Interaction (Card)
-    ↓
-Home Assistant Services
-    ↓
-Integration (Alarm Coordinator)
-    ↓
-Database ← → Lock Manager ← → Z-Wave JS
-    ↓
-Event Logging → Log Service → Web UI
+  pin: "123456"          # required
 ```
 
 ## 🔒 Security Features
 
 - **PIN Authentication**: 6-8 digit PINs with bcrypt hashing
-- **Service PIN**: Internal secure authentication for automation
-- **Failed Attempt Lockout**: 5 attempts = 5 minute lockout
-- **Duress Codes**: Silent alert codes for emergencies
+- **Service PIN**: Auto-generated internal PIN for HA automation calls
+- **API Token**: Optional bearer token for the container REST API
+- **Failed Attempt Lockout**: 5 attempts triggers a 5-minute lockout
+- **Duress Codes**: Silent alert codes that appear to disarm normally
 - **Audit Logging**: Complete event history with user attribution
-- **Per-Lock Access**: Granular control over lock permissions
+- **Per-Lock Access**: Granular control over which users access which locks
 
-## 🎨 Screenshots
+## 📖 Documentation
 
-### Alarm Card
-![Alarm Card](docs/images/alarm-card.png)
-
-### Admin Panel
-![Admin Panel](docs/images/admin-panel.png)
-
-### Web Management
-![Web UI](docs/images/web-ui.png)
-
-## 🤝 Contributing
-
-Contributions welcome! Please:
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
-
-## 📝 License
-
-MIT License - See [LICENSE](LICENSE) file
-
-## 🙏 Acknowledgments
-
-- Home Assistant community
-- Z-Wave JS team
-- All contributors
-
-## 📞 Support
-
-- **Issues**: [Github Issues](https://github.com/mmotrock/homesecure-addon/issues)
-- **Documentation**: This repository
-- **Community**: Home Assistant forums
-
-## ⚠️ Disclaimer
-
-HomeSecure is a DIY security system intended for personal use. While designed with security best practices, it should not be relied upon as the sole security measure for your home. Always follow local regulations and consider professional monitoring services for critical security needs.
-
-**Not suitable for:**
-- Commercial security installations
-- Life-safety applications
-- Professional monitoring services (without additional integration)
-
-**Recommended for:**
-- Home automation enthusiasts
-- DIY home security
-- Integration with existing professional systems
-- Smart home access control
-
-## 🚀 Roadmap
-
-### v1.1.0 (Planned)
-- [ ] Professional monitoring integration
-- [ ] SMS notification support
-- [ ] Video camera integration
-- [ ] Mobile app companion
-
-### v1.2.0 (Future)
-- [ ] Zigbee lock support
-- [ ] Bluetooth lock support
-- [ ] Geofencing integration
-- [ ] Voice assistant integration
+- **[Changelog](CHANGELOG.md)** — Version history
+- **[Admin Panel Guide](www/ADMIN_README.md)** — Managing users and locks
 
 ## 📊 System Requirements
 
 - **Home Assistant**: 2024.1.0 or later
 - **Memory**: 256MB minimum (512MB recommended)
-- **Storage**: 100MB for add-on, 50MB for logs
-- **Z-Wave**: Z-Wave JS integration (for lock features)
-- **Network**: Local network access to Z-Wave JS server
-
-## 🔄 Update Instructions
-
-When updates are available:
-
-1. Supervisor → HomeSecure → Update
-2. Wait for update to complete
-3. Restart add-on if prompted
-4. Check changelog for breaking changes
-5. Test all functionality
+- **Storage**: 100MB for add-on, database grows with event history
+- **Z-Wave**: Z-Wave JS add-on (for lock features)
 
 ## 💡 Tips & Best Practices
 
-1. **Backup Database**: Regularly backup `/config/homesecure.db`
-2. **Test Codes**: Verify lock codes after adding users
-3. **Monitor Logs**: Check for sync errors in web UI
-4. **Use Separate PINs**: Different PINs for alarm vs locks
-5. **Enable Auto-Lock**: Automatically secure doors on arm
-6. **Set Up Duress**: Configure a duress code for emergencies
-7. **Regular Updates**: Keep add-on updated for security patches
+1. **Enable Watchdog**: Ensures the add-on restarts automatically if it crashes
+2. **Set an API Token**: Protects the container API if your HA instance is exposed externally
+3. **Use Separate PINs**: Different PINs for alarm vs locks limits exposure if one is compromised
+4. **Set Up a Duress Code**: Configure a duress code for emergency situations
+5. **Monitor Sync Errors**: Check `/api/locks` periodically to verify lock codes are in sync
+6. **Backup the Database**: `/data/homesecure.db` is the single source of truth in v2.0
+
+## 🤝 Contributing
+
+Contributions welcome! Please fork, create a feature branch, test thoroughly, and submit a pull request.
+
+## 📝 License
+
+MIT License — See [LICENSE](LICENSE) file
+
+## ⚠️ Disclaimer
+
+HomeSecure is a DIY security system for personal use. It should not be relied upon as the sole security measure for your home. Always follow local regulations and consider professional monitoring for critical security needs.
 
 ---
 

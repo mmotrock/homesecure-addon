@@ -1,63 +1,69 @@
 #!/usr/bin/with-contenv bashio
 set -e
 
-CONFIG_PATH=/data/options.json
-
-# Parse configuration
+# ── read addon options ─────────────────────────────────────────────────────
 ZWAVE_URL=$(bashio::config 'zwave_server_url')
 LOG_LEVEL=$(bashio::config 'log_level')
+API_TOKEN=$(bashio::config 'api_token' 2>/dev/null || echo "")
 
-bashio::log.info "=========================================="
-bashio::log.info "Starting HomeSecure Add-on v1.0.2"
-bashio::log.info "=========================================="
+bashio::log.info "======================================================="
+bashio::log.info " HomeSecure Container  v2.1.0"
+bashio::log.info "======================================================="
+bashio::log.info " Z-Wave JS : ${ZWAVE_URL}"
+bashio::log.info " Log level : ${LOG_LEVEL}"
+bashio::log.info "======================================================="
 
-# Configure logging
-bashio::log.info "Configuring logging (level: ${LOG_LEVEL})..."
-/usr/bin/configure-logging.sh "${LOG_LEVEL}"
+# ── Integration install notice ─────────────────────────────────────────────
+# In v2.0 the add-on no longer auto-installs the HA integration.
+# Print a clear notice on every startup until the integration is detected.
+if [ ! -f "/config/custom_components/homesecure/__init__.py" ]; then
+    bashio::log.warning ""
+    bashio::log.warning "╔══════════════════════════════════════════════════════╗"
+    bashio::log.warning "║   ACTION REQUIRED — Integration not installed        ║"
+    bashio::log.warning "╠══════════════════════════════════════════════════════╣"
+    bashio::log.warning "║                                                      ║"
+    bashio::log.warning "║  The HomeSecure HA integration must be installed     ║"
+    bashio::log.warning "║  manually.  Copy the custom_components/homesecure/   ║"
+    bashio::log.warning "║  folder from the add-on repository to:               ║"
+    bashio::log.warning "║                                                      ║"
+    bashio::log.warning "║    /config/custom_components/homesecure/             ║"
+    bashio::log.warning "║                                                      ║"
+    bashio::log.warning "║  Then restart Home Assistant and add the integration ║"
+    bashio::log.warning "║  via Settings → Devices & Services → Add Integration ║"
+    bashio::log.warning "║  Search: HomeSecure                                  ║"
+    bashio::log.warning "║  URL:    http://localhost:8099                        ║"
+    bashio::log.warning "║                                                      ║"
+    bashio::log.warning "║  The container API is running and ready.             ║"
+    bashio::log.warning "╚══════════════════════════════════════════════════════╝"
+    bashio::log.warning ""
+else
+    bashio::log.info "✓ Integration detected at /config/custom_components/homesecure/"
+fi
 
-# Install integration
-bashio::log.info "Installing HomeSecure integration..."
-/usr/bin/install-integration.sh "${ZWAVE_URL}"
-
-# Install Lovelace cards
-bashio::log.info "Installing Lovelace cards..."
+# ── install Lovelace cards (still lives here) ──────────────────────────────
+bashio::log.info "Installing Lovelace cards …"
 mkdir -p /config/www
-cp -f /app/www/homesecure-card.js /config/www/
+cp -f /app/www/homesecure-card.js  /config/www/
 cp -f /app/www/homesecure-admin.js /config/www/
 bashio::log.info "✓ Cards installed to /config/www/"
 
-# Add to Lovelace resources if not already there
 if [ -f /config/.storage/lovelace_resources ]; then
     if ! grep -q "homesecure-card.js" /config/.storage/lovelace_resources 2>/dev/null; then
-        bashio::log.warning "⚠ Please add cards to Lovelace resources:"
-        bashio::log.warning "  Settings → Dashboards → Resources → Add Resource"
-        bashio::log.warning "  URL: /local/homesecure-card.js (JavaScript Module)"
-        bashio::log.warning "  URL: /local/homesecure-admin.js (JavaScript Module)"
+        bashio::log.warning "⚠ Add the cards to Lovelace resources:"
+        bashio::log.warning "  /local/homesecure-card.js  (JavaScript Module)"
+        bashio::log.warning "  /local/homesecure-admin.js (JavaScript Module)"
     fi
 fi
 
-# Start log aggregation service
-bashio::log.info "Starting log aggregation service..."
-python3 /app/log_service.py &
-LOG_PID=$!
+# ── environment for the Python services ───────────────────────────────────
+export DB_PATH="/data/homesecure.db"
+export ZWAVE_URL="${ZWAVE_URL}"
+export LOG_LEVEL="${LOG_LEVEL}"
+export API_HOST="0.0.0.0"
+export API_PORT="8099"
+[ -n "${API_TOKEN}" ] && export HOMESECURE_API_TOKEN="${API_TOKEN}"
 
-# Start web interface
-bashio::log.info "Starting web interface on port 8099..."
-python3 /app/web_interface.py &
-WEB_PID=$!
-
-bashio::log.info "=========================================="
-bashio::log.info "✓ HomeSecure started successfully!"
-bashio::log.info "=========================================="
-bashio::log.info ""
-bashio::log.info "Next steps:"
-bashio::log.info "1. Restart Home Assistant (required to load the integration)"
-bashio::log.info "2. After restart, check notifications for HomeSecure setup prompt"
-bashio::log.info "3. Add Lovelace resources (see warnings above)"
-bashio::log.info "4. Add HomeSecure card to your dashboard"
-bashio::log.info ""
-bashio::log.info "Web UI: Supervisor → HomeSecure → Open Web UI"
-bashio::log.info "=========================================="
-
-# Wait for processes
-wait $LOG_PID $WEB_PID
+# ── start the HomeSecure container service ─────────────────────────────────
+bashio::log.info "Starting HomeSecure container service …"
+cd /app
+exec python3 main.py

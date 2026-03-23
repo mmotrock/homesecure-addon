@@ -5,12 +5,12 @@ ENV LANG=C.UTF-8
 ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
-# Install system requirements + build deps needed to compile Python packages
+# System deps — nginx removed (api_server.py is its own HTTP server)
+# cargo/gcc/musl-dev still needed to compile bcrypt wheels on Alpine
 RUN apk add --no-cache \
     python3 \
     py3-pip \
     sqlite \
-    nginx \
     jq \
     bash \
     gcc \
@@ -20,7 +20,8 @@ RUN apk add --no-cache \
     cargo \
     openssl-dev
 
-# Create virtual environment and install Python packages inside it
+# Python packages for the container service
+# bcrypt + zwave-js-server-python stay here (moved OUT of the HA integration)
 RUN python3 -m venv $VIRTUAL_ENV && \
     pip install --no-cache-dir \
         bcrypt \
@@ -28,27 +29,28 @@ RUN python3 -m venv $VIRTUAL_ENV && \
         aiohttp \
         pyyaml
 
-# Copy root filesystem
+# Scripts
 COPY rootfs /
+RUN chmod a+x /usr/bin/configure-logging.sh
 
-# Make scripts executable
-RUN chmod a+x /usr/bin/install-integration.sh && \
-    chmod a+x /usr/bin/configure-logging.sh
-
-# Setup directories
-RUN mkdir -p /var/log/homesecure && \
-    mkdir -p /app/custom_components && \
-    mkdir -p /app/www
+# App directories
+RUN mkdir -p /app/www /data
 
 WORKDIR /app
 
-# Copy add-on files
-COPY run.sh /app/
-COPY custom_components/ /app/custom_components/
-COPY www/ /app/www/
-COPY log_service.py /app/
-COPY web_interface.py /app/
+# Container service files (root-level Python — the actual HomeSecure process)
+COPY main.py             /app/
+COPY api_server.py       /app/
+COPY alarm_coordinator.py /app/
+COPY lock_manager.py     /app/
+COPY database.py         /app/
+COPY migrate.py          /app/
 
+# Lovelace cards (copied to /config/www at runtime by run.sh)
+COPY www/ /app/www/
+
+# run.sh starts main.py
+COPY run.sh /app/
 RUN chmod a+x /app/run.sh
 
 CMD ["/app/run.sh"]

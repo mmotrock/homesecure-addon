@@ -1,12 +1,16 @@
 /**
- * HomeSecure Badge Card - Updated with Admin Button and Garage Type Selection
+ * HomeSecure Badge Card v2.1
  * Custom Lovelace card for HomeSecure System
- * 
- * Installation:
- * 1. Copy to /config/www/homesecure-card.js
- * 2. Add to Lovelace resources:
- *    url: /local/homesecure-card.js
- *    type: module
+ *
+ * In v2.1 arm/disarm calls go directly to the container REST API.
+ * Entry point lock/cover toggles still use HA services (they are native HA entities).
+ *
+ * Config options:
+ *   entity       - alarm_control_panel entity (for state display only)
+ *   api_url      - Container API URL (default: http://localhost:8099)
+ *   api_token    - Optional API bearer token
+ *   card_height  - CSS height (default: 100%)
+ *   entry_points - list of entry point objects
  */
 
 class HomeSecureCard extends HTMLElement {
@@ -16,6 +20,8 @@ class HomeSecureCard extends HTMLElement {
     this._pin = '';
     this._showInterface = false;
     this._showAdmin = false;
+    this._apiUrl = 'http://localhost:8099';
+    this._apiToken = '';
   }
 
   static getConfigElement() {
@@ -38,6 +44,8 @@ class HomeSecureCard extends HTMLElement {
       card_height: '100%',
       ...config
     };
+    this._apiUrl = (config.api_url || 'http://localhost:8099').replace(/\/$/, '');
+    this._apiToken = config.api_token || '';
     this.render();
   }
 
@@ -556,7 +564,7 @@ class HomeSecureCard extends HTMLElement {
     if (!this._adminPanel) {
       try {
         this._adminPanel = document.createElement('homesecure-admin');
-        this._adminPanel.setConfig({ entity: this.config.entity });
+        this._adminPanel.setConfig({ entity: this.config.entity, api_url: this._apiUrl, api_token: this._apiToken });
         this._adminPanel.hass = this._hass;
         this._adminPanel.addEventListener('close-admin', () => {
           this._showAdmin = false;
@@ -885,10 +893,7 @@ class HomeSecureCard extends HTMLElement {
     // Arm actions
     this.shadowRoot.querySelectorAll('[data-action="arm-home"]').forEach(el => {
       el.addEventListener('click', () => {
-        // No PIN needed for arming - just call the service
-        this.callService('alarm_control_panel', 'alarm_arm_home', { 
-          entity_id: this.config.entity 
-        });
+        this._apiCall('/api/arm_home', {}).catch(e => console.error('arm_home failed:', e));
         this._showInterface = false;
         setTimeout(() => this.render(), 300);
       });
@@ -896,10 +901,7 @@ class HomeSecureCard extends HTMLElement {
 
     this.shadowRoot.querySelectorAll('[data-action="arm-away"]').forEach(el => {
       el.addEventListener('click', () => {
-        // No PIN needed for arming - just call the service
-        this.callService('alarm_control_panel', 'alarm_arm_away', { 
-          entity_id: this.config.entity 
-        });
+        this._apiCall('/api/arm_away', {}).catch(e => console.error('arm_away failed:', e));
         this._showInterface = false;
         setTimeout(() => this.render(), 300);
       });
@@ -908,10 +910,10 @@ class HomeSecureCard extends HTMLElement {
     this.shadowRoot.querySelectorAll('[data-action="disarm"]').forEach(el => {
       el.addEventListener('click', () => {
         if (this._pin.length >= 6) {
-          this.callService('homesecure', 'disarm', { pin: this._pin });
-          this._showInterface = false;
+          const pin = this._pin;
           this._pin = '';
-          // Don't render here - let the state change trigger it
+          this._showInterface = false;
+          this._apiCall('/api/disarm', { pin }).catch(e => console.error('disarm failed:', e));
           setTimeout(() => this.render(), 300);
         }
       });
@@ -947,7 +949,23 @@ class HomeSecureCard extends HTMLElement {
     });
   }
 
+  async _apiCall(path, body) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (this._apiToken) headers['Authorization'] = `Bearer ${this._apiToken}`;
+    const resp = await fetch(this._apiUrl + path, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body)
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`API error ${resp.status}: ${text}`);
+    }
+    return resp.json();
+  }
+
   callService(domain, service, data) {
+    // Used only for native HA entity toggles (lock/cover entry points)
     this._hass.callService(domain, service, data);
   }
 }
