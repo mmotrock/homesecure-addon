@@ -2,7 +2,7 @@
 
 A badge-style card for controlling your HomeSecure alarm system in Home Assistant.
 
-![Version](https://img.shields.io/badge/version-2.1.0-blue)
+![Version](https://img.shields.io/badge/version-2.0.0-blue)
 
 ## Installation
 

@@ -1,8 +1,8 @@
 /**
- * HomeSecure Badge Card v2.1
+ * HomeSecure Badge Card v2.0
  * Custom Lovelace card for HomeSecure System
  *
- * In v2.1 arm/disarm calls go directly to the container REST API.
+ * In v2.0 arm/disarm calls go directly to the container REST API.
  * Entry point lock/cover toggles still use HA services (they are native HA entities).
  *
  * Config options:

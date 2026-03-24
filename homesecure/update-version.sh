@@ -11,13 +11,13 @@
 #   1. Pass a version argument — the script uses that as the new version and
 #      derives the old version from whatever is currently in config.yaml:
 #
-#        ./update_version.sh 2.1.0
+#        ./update_version.sh 2.0.0
 #
 #   2. No argument — edit config.yaml first to set the new version, then run
 #      the script with no arguments. It reads both the git-tracked (old) and
 #      working-copy (new) versions automatically:
 #
-#        # edit config.yaml:  version: "2.1.0"
+#        # edit config.yaml:  version: "2.0.0"
 #        ./update_version.sh
 #
 # The script must be run from the repository root (the directory that contains
@@ -61,18 +61,18 @@ elif [[ $# -eq 0 ]]; then
 
 else
   echo "Usage: $0 [new_version]"
-  echo "  e.g. $0 2.1.0          # pass version explicitly"
+  echo "  e.g. $0 2.0.0          # pass version explicitly"
   echo "  e.g. $0                 # read new version from config.yaml (requires git)"
   exit 1
 fi
 
 # Require semver X.Y.Z
 if ! [[ "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "Error: new version must be in X.Y.Z format (e.g. 2.1.0), got: '$NEW'"
+  echo "Error: new version must be in X.Y.Z format (e.g. 2.0.0), got: '$NEW'"
   exit 1
 fi
 if ! [[ "$OLD" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "Error: old version must be in X.Y.Z format (e.g. 2.0.0), got: '$OLD'"
+  echo "Error: old version must be in X.Y.Z format (e.g. 1.0.2), got: '$OLD'"
   exit 1
 fi
 if [[ "$OLD" == "$NEW" ]]; then
@@ -81,7 +81,7 @@ if [[ "$OLD" == "$NEW" ]]; then
 fi
 
 # Derive short forms X.Y (used in prose comments and badge labels)
-NEW_SHORT="${NEW%.*}"   # strips patch  →  "2.1"
+NEW_SHORT="${NEW%.*}"   # strips patch  →  "2.0"
 OLD_SHORT="${OLD%.*}"
 
 echo "=================================================="
@@ -166,7 +166,7 @@ update "www/homesecure-card.js" \
   "s/v${OLD_SHORT//./\\.}/v${NEW_SHORT}/g" \
   'card version comment'
 
-# www/homesecure-admin.js  →  HomeSecure Admin Panel v2.1  (may differ from
+# www/homesecure-admin.js  →  HomeSecure Admin Panel v2.0  (may differ from
 # addon version — only update if the short base (2.x) matches)
 update "www/homesecure-admin.js" \
   "s/(HomeSecure Admin Panel v)[0-9]+\.[0-9]+/\1${NEW_SHORT}/" \

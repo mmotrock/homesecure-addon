@@ -2,7 +2,7 @@
 
 A professional-grade security system for Home Assistant with alarm control, Z-Wave lock integration, multi-user management, and comprehensive event logging.
 
-![Version](https://img.shields.io/badge/version-2.1.0-blue)
+![Version](https://img.shields.io/badge/version-2.0.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.1+-orange)
 
@@ -50,7 +50,7 @@ A professional-grade security system for Home Assistant with alarm control, Z-Wa
 
 ## 🏗️ Architecture
 
-HomeSecure v2.1 uses a container-first architecture. All security logic runs inside the add-on container and exposes a REST/WebSocket API. The HA integration is a thin proxy — it reflects state and forwards commands, but contains no business logic of its own.
+HomeSecure v2.0 uses a container-first architecture. All security logic runs inside the add-on container and exposes a REST/WebSocket API. The HA integration is a thin proxy — it reflects state and forwards commands, but contains no business logic of its own.
 
 ```
 ┌─────────────────────────────────────────┐

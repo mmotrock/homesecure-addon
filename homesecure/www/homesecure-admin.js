@@ -1,5 +1,5 @@
 /**
- * HomeSecure Admin Panel v2.1
+ * HomeSecure Admin Panel v2.0
  * Admin interface — talks directly to the HomeSecure container REST API.
  * No longer uses HA services for user/lock/config operations.
  *

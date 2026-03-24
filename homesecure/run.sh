@@ -7,7 +7,7 @@ LOG_LEVEL=$(bashio::config 'log_level')
 API_TOKEN=$(bashio::config 'api_token' 2>/dev/null || echo "")
 
 bashio::log.info "======================================================="
-bashio::log.info " HomeSecure Container  v2.1.0"
+bashio::log.info " HomeSecure Container  v2.0.0"
 bashio::log.info "======================================================="
 bashio::log.info " Z-Wave JS : ${ZWAVE_URL}"
 bashio::log.info " Log level : ${LOG_LEVEL}"
