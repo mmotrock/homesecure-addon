@@ -108,22 +108,23 @@ class LockManager:
                 _LOGGER.info("Z-Wave JS driver ready — %d node(s)", nodes)
                 return
 
-            # Otherwise wait for the driver-ready event.
-            driver_ready = asyncio.Event()
-            self._zwave_client.driver_events.on(
-                "driver ready", lambda: driver_ready.set()
-            )
+            # Driver not yet ready — poll until it becomes available.
+            # (driver_events was removed in newer versions of zwave-js-server-python;
+            # the driver object is populated by the client's internal listen loop.)
+            _LOGGER.info("Waiting for Z-Wave JS driver to become ready …")
+            deadline = asyncio.get_running_loop().time() + 30.0
+            while asyncio.get_running_loop().time() < deadline:
+                await asyncio.sleep(0.5)
+                if self._zwave_client.driver:
+                    nodes = len(self._zwave_client.driver.controller.nodes)
+                    _LOGGER.info("Z-Wave JS driver ready — %d node(s)", nodes)
+                    return
 
-            try:
-                await asyncio.wait_for(driver_ready.wait(), timeout=30.0)
-                nodes = len(self._zwave_client.driver.controller.nodes)
-                _LOGGER.info("Z-Wave JS driver ready — %d node(s)", nodes)
-            except asyncio.TimeoutError:
-                _LOGGER.error(
-                    "Timed out waiting for Z-Wave JS driver ready. "
-                    "Lock features will be unavailable until next restart."
-                )
-                self._zwave_client = None
+            _LOGGER.error(
+                "Timed out waiting for Z-Wave JS driver ready. "
+                "Lock features will be unavailable until next reconnect."
+            )
+            self._zwave_client = None
 
         except Exception as exc:
             _LOGGER.error("Failed to connect to Z-Wave JS: %s", exc, exc_info=True)
