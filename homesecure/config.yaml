@@ -12,6 +12,13 @@ arch:
   - aarch64
   - amd64
   - i386
+init: false
+hassio_api: true
+hassio_role: default
+ingress: true
+panel_icon: mdi:shield-home
+panel_title: HomeSecure
+watchdog: true
 startup: application
 boot: auto
 map:
