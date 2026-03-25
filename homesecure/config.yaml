@@ -20,6 +20,7 @@ hassio_role: default
 ingress: true
 ingress_port: 8099
 panel_icon: mdi:shield-home
+panel_title: HomeSecure
 map:
   - config:rw
   - share:rw
