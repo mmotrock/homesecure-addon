@@ -24,7 +24,6 @@ panel_title: HomeSecure
 watchdog: true
 
 options:
-  log_level: "info"
   api_token: ""
 
 map:
