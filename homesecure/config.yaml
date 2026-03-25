@@ -24,7 +24,6 @@ panel_title: HomeSecure
 watchdog: true
 
 options:
-  zwave_server_url: "ws://a0d7b954-zwavejs2mqtt:3000"
   log_level: "info"
   api_token: ""
 
