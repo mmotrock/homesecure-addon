@@ -96,7 +96,7 @@
 - Z-Wave server URL is now read from addon options via the supervisor API
   at integration startup, with fallback to default URL if unavailable
 
-## [2.0.0] - 2026-03-08
+## [2.0.0] - 2026-03-25
 
 ### Breaking Changes
 - **Container-first architecture**: All business logic (alarm state machine, user/PIN
@@ -239,10 +239,7 @@ PIN is regenerated fresh by the container on first run.
   direct container API communication model, new `api_url` and `api_token`
   config options, and updated troubleshooting steps.
   
-## [2.1.0] — Security Remediation & User-Configurable Settings
-
 ### 🔴 Critical Fixes
-
 - **C1 — Arm operations now rate-limited**
   `arm_away()` and `arm_home()` now route through `authenticate_user()`, applying the
   same failed-attempt counter and lockout as disarm. Previously only disarm was protected.
@@ -261,7 +258,6 @@ PIN is regenerated fresh by the container on first run.
   `occupied_slots: [1, 3, …]` (slot numbers only) and `total_slots: 30`.
 
 ### 🟠 High Fixes
-
 - **H1 — Service PIN comparison uses `hmac.compare_digest`**
   Timing-safe comparison prevents timing-oracle attacks on the service PIN in both
   `authenticate_user_service()` (database layer) and `arm_away/arm_home` (coordinator).
@@ -293,7 +289,6 @@ PIN is regenerated fresh by the container on first run.
   `lock_pin`.
 
 ### 🟡 Medium Fixes
-
 - **M1 — WAL journal mode enabled; event log now pruned automatically**
   All SQLite connections use `PRAGMA journal_mode=WAL` and `synchronous=NORMAL`.
   `log_event()` now calls `_prune_events()` after every insert, deleting events older
@@ -323,7 +318,6 @@ PIN is regenerated fresh by the container on first run.
   config, then backs off 60 seconds. Previously it retried every 5 seconds forever.
 
 ### 🔵 Low / Robustness Fixes
-
 - **L1 — Startup log clarified**
   `main.py` now logs token-auth status ("ENABLED" / "DISABLED") and the active
   trusted-networks CIDR list on startup.
@@ -342,11 +336,9 @@ PIN is regenerated fresh by the container on first run.
 ---
 
 ### ✨ New User-Configurable Settings
-
 All settings are saved via `POST /api/config` with admin PIN authentication.
 
 #### Security Tab (admin card)
-
 | Setting | DB column | Default | Range |
 |---|---|---|---|
 | Failed attempts before lockout | `max_failed_attempts` | 5 | 3–20 |
@@ -355,7 +347,6 @@ All settings are saved via `POST /api/config` with admin PIN authentication.
 | Require PIN to arm | `require_pin_to_arm` | off | on / off |
 
 #### General Tab (admin card)
-
 | Setting | DB column | Default | Range |
 |---|---|---|---|
 | Entry delay | `entry_delay` | 30 s | 0–300 s |
@@ -369,8 +360,7 @@ All settings are saved via `POST /api/config` with admin PIN authentication.
 
 ---
 
-### 🖥️ Admin Card (homesecure-admin.js) — v2.1
-
+### 🖥️ Admin Card (homesecure-admin.js) — v2.0
 - **Security tab fully implemented** — was previously a "Coming Soon" placeholder.
   All four security settings rendered as purpose-built controls:
   - PIN lockout count and duration as numeric inputs with inline range hints
