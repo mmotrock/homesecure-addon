@@ -1,7 +1,10 @@
 name: HomeSecure
 version: "2.0.0"
 slug: homesecure
-description: Complete home security system with alarm panel, user management, and Z-Wave lock integration.
+description: >
+  Complete home security system — alarm panel, user management, and Z-Wave lock
+  integration. Exposes a REST/WebSocket API that the HomeSecure HA integration
+  uses; no custom_component installation needed.
 url: https://github.com/mmotrock/homesecure-addon
 arch:
   - armhf
