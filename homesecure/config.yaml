@@ -14,11 +14,9 @@ arch:
   - i386
 init: false
 startup: application
-boot: auto
 hassio_api: true
-hassio_role: default
 ingress: true
-ingress_port: 8099 #May need to switch to ports
+ingress_port: 8099
 panel_icon: mdi:shield-home
 panel_title: HomeSecure
 map:
