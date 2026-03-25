@@ -463,7 +463,7 @@ class APIServer:
 
     async def _index(self, _: web.Request) -> web.Response:
         return web.Response(
-            text="HomeSecure API v1 — see /api/ws for real-time updates",
+            text="HomeSecure API v2.0 — see /api/ws for real-time updates",
             content_type="text/plain",
         )
 

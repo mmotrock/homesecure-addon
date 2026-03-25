@@ -56,6 +56,8 @@ class LockManager:
         """Disconnect cleanly."""
         if hasattr(self, "_reconnect_task") and self._reconnect_task:
             self._reconnect_task.cancel()
+        if hasattr(self, "_listen_task") and self._listen_task:
+            self._listen_task.cancel()
         if self._zwave_client:
             try:
                 await self._zwave_client.disconnect()
@@ -102,15 +104,22 @@ class LockManager:
             _LOGGER.info("Connecting to Z-Wave JS server at %s …", self._zwave_server_url)
             await self._zwave_client.connect()
 
-            # If driver is immediately ready we're done.
+            # listen() processes incoming WebSocket messages and populates
+            # client.driver. It must run concurrently as a background task —
+            # without it client.driver never becomes set.
+            if hasattr(self, "_listen_task") and self._listen_task:
+                self._listen_task.cancel()
+            self._listen_task = asyncio.create_task(
+                self._zwave_client.listen(), name="zwave_listen"
+            )
+
+            # If driver is already ready (reconnect case) we're done.
             if self._zwave_client.driver:
                 nodes = len(self._zwave_client.driver.controller.nodes)
                 _LOGGER.info("Z-Wave JS driver ready — %d node(s)", nodes)
                 return
 
-            # Driver not yet ready — poll until it becomes available.
-            # (driver_events was removed in newer versions of zwave-js-server-python;
-            # the driver object is populated by the client's internal listen loop.)
+            # Poll until listen() populates client.driver (normally < 1s).
             _LOGGER.info("Waiting for Z-Wave JS driver to become ready …")
             deadline = asyncio.get_running_loop().time() + 30.0
             while asyncio.get_running_loop().time() < deadline:

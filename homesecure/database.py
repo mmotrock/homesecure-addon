@@ -37,6 +37,7 @@ VALID_CONFIG_KEYS = {
     "auto_lock_on_arm_home", "auto_lock_on_arm_away",
     "auto_close_on_arm_home", "auto_close_on_arm_away",
     "lock_entities", "garage_entities", "lock_sync_interval",
+    "service_pin",
     # security / behaviour settings (new in v2.0)
     "max_failed_attempts", "lockout_duration",
     "alarm_auto_action", "require_pin_to_arm",
