@@ -21,6 +21,8 @@ ingress: true
 ingress_port: 8099
 panel_icon: mdi:shield-home
 panel_title: HomeSecure
+watchdog: true
+
 map:
   - config:rw
   - share:rw
