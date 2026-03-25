@@ -1,10 +1,7 @@
 name: HomeSecure
 version: "2.0.0"
 slug: homesecure
-description: >
-  Complete home security system — alarm panel, user management, and Z-Wave lock
-  integration. Exposes a REST/WebSocket API that the HomeSecure HA integration
-  uses; no custom_component installation needed.
+description: Complete home security system with alarm panel, user management, and Z-Wave lock integration.
 url: https://github.com/mmotrock/homesecure-addon
 arch:
   - armhf
@@ -19,11 +16,7 @@ ingress: true
 ingress_port: 8099
 panel_icon: mdi:shield-home
 panel_title: HomeSecure
-map:
-  - config:rw
-  - share:rw
-  - ssl:ro
-  - data:rw
+watchdog: "http://[HOST]:8099/health"
 options:
   zwave_server_url: "ws://a0d7b954-zwavejs2mqtt:3000"
   log_level: "info"
@@ -32,4 +25,9 @@ schema:
   zwave_server_url: str
   log_level: list(debug|info|warning|error)?
   api_token: str?
+map:
+  - config:rw
+  - share:rw
+  - ssl:ro
+  - data:rw
 image: "ghcr.io/mmotrock/homesecure-{arch}"
