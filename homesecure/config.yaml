@@ -24,7 +24,6 @@ panel_title: HomeSecure
 watchdog: true
 
 options:
-  api_token: ""
 
 map:
   - config:rw
