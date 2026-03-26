@@ -52,8 +52,7 @@ COPY custom_components/ /app/custom_components/
 # Lovelace cards (copied to /config/www at runtime by run.sh)
 COPY www/ /app/www/
 
-# run.sh starts main.py
-COPY run.sh /app/
-RUN chmod a+x /app/run.sh
-
-CMD ["/app/run.sh"]
+# run.sh — place where s6-overlay expects it so bashio and with-contenv work
+RUN mkdir -p /etc/services.d/homesecure
+COPY run.sh /etc/services.d/homesecure/run
+RUN chmod a+x /etc/services.d/homesecure/run

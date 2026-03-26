@@ -13,31 +13,49 @@ bashio::log.info " Z-Wave JS : ${ZWAVE_URL}"
 bashio::log.info " Log level : ${LOG_LEVEL}"
 bashio::log.info "======================================================="
 
-# ── Integration install notice ─────────────────────────────────────────────
-# In v2.0 the add-on no longer auto-installs the HA integration.
-# Print a clear notice on every startup until the integration is detected.
-if [ ! -f "/config/custom_components/homesecure/__init__.py" ]; then
+# ── Auto-install / update the HA integration ──────────────────────────────
+INTEGRATION_SRC="/app/custom_components/homesecure"
+INTEGRATION_DST="/config/custom_components/homesecure"
+ADDON_VERSION=$(bashio::addon.version)
+
+_installed_version() {
+    local manifest="${INTEGRATION_DST}/manifest.json"
+    if [ -f "${manifest}" ]; then
+        grep -o '"version": *"[^"]*"' "${manifest}" | grep -o '[0-9][^"]*' | head -1
+    fi
+}
+
+INSTALLED_VERSION=$(_installed_version)
+
+if [ -z "${INSTALLED_VERSION}" ]; then
+    # Fresh install — not present yet
+    bashio::log.info "Installing HomeSecure integration v${ADDON_VERSION} …"
+    mkdir -p "${INTEGRATION_DST}"
+    cp -rf "${INTEGRATION_SRC}/." "${INTEGRATION_DST}/"
+    bashio::log.info "✓ Integration installed to ${INTEGRATION_DST}"
     bashio::log.warning ""
     bashio::log.warning "╔══════════════════════════════════════════════════════╗"
-    bashio::log.warning "║   ACTION REQUIRED — Integration not installed        ║"
+    bashio::log.warning "║   ACTION REQUIRED — Restart Home Assistant           ║"
     bashio::log.warning "╠══════════════════════════════════════════════════════╣"
     bashio::log.warning "║                                                      ║"
-    bashio::log.warning "║  The HomeSecure HA integration must be installed     ║"
-    bashio::log.warning "║  manually.  Copy the custom_components/homesecure/   ║"
-    bashio::log.warning "║  folder from the add-on repository to:               ║"
+    bashio::log.warning "║  The HomeSecure integration has been installed.      ║"
+    bashio::log.warning "║  Please restart Home Assistant, then add it via:     ║"
     bashio::log.warning "║                                                      ║"
-    bashio::log.warning "║    /config/custom_components/homesecure/             ║"
-    bashio::log.warning "║                                                      ║"
-    bashio::log.warning "║  Then restart Home Assistant and add the integration ║"
-    bashio::log.warning "║  via Settings → Devices & Services → Add Integration ║"
+    bashio::log.warning "║  Settings → Devices & Services → Add Integration    ║"
     bashio::log.warning "║  Search: HomeSecure                                  ║"
     bashio::log.warning "║  URL:    http://localhost:8099                        ║"
     bashio::log.warning "║                                                      ║"
-    bashio::log.warning "║  The container API is running and ready.             ║"
     bashio::log.warning "╚══════════════════════════════════════════════════════╝"
     bashio::log.warning ""
+elif [ "${INSTALLED_VERSION}" != "${ADDON_VERSION}" ]; then
+    # Upgrade — version mismatch
+    bashio::log.info "Updating HomeSecure integration ${INSTALLED_VERSION} → ${ADDON_VERSION} …"
+    cp -rf "${INTEGRATION_SRC}/." "${INTEGRATION_DST}/"
+    bashio::log.info "✓ Integration updated to v${ADDON_VERSION}"
+    bashio::log.warning "⚠ Restart Home Assistant to apply the integration update."
 else
-    bashio::log.info "✓ Integration detected at /config/custom_components/homesecure/"
+    # Already up to date
+    bashio::log.info "✓ Integration v${INSTALLED_VERSION} is up to date"
 fi
 
 # ── install Lovelace cards (still lives here) ──────────────────────────────
@@ -65,5 +83,4 @@ export API_PORT="8099"
 
 # ── start the HomeSecure container service ─────────────────────────────────
 bashio::log.info "Starting HomeSecure container service …"
-cd /app
-exec python3 main.py
+exec /opt/venv/bin/python3 /app/main.py
