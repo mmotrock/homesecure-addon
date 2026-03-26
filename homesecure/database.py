@@ -126,6 +126,7 @@ class AlarmDatabase:
                     lock_entities          TEXT,
                     garage_entities        TEXT,
                     lock_sync_interval     INTEGER DEFAULT 3600,
+                    service_pin            TEXT,
                     -- security / behaviour (user-configurable)
                     max_failed_attempts    INTEGER DEFAULT 5,
                     lockout_duration       INTEGER DEFAULT 300,
@@ -221,6 +222,7 @@ class AlarmDatabase:
                 row[1] for row in cur.execute(f"PRAGMA table_info({TABLE_CONFIG})")
             }
             migrations = [
+                ("service_pin",         "TEXT"),
                 ("max_failed_attempts", "INTEGER DEFAULT 5"),
                 ("lockout_duration",    "INTEGER DEFAULT 300"),
                 ("alarm_auto_action",   "TEXT    DEFAULT 'none'"),

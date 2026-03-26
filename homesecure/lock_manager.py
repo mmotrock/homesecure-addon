@@ -104,36 +104,26 @@ class LockManager:
             _LOGGER.info("Connecting to Z-Wave JS server at %s …", self._zwave_server_url)
             await self._zwave_client.connect()
 
-            # listen() processes incoming WebSocket messages and populates
-            # client.driver. It must run concurrently as a background task —
-            # without it client.driver never becomes set.
+            # listen() requires a driver_ready Event — it sets the event once
+            # the driver is fully initialised. Run it as a background task so
+            # we can await the event concurrently.
             if hasattr(self, "_listen_task") and self._listen_task:
                 self._listen_task.cancel()
+            driver_ready = asyncio.Event()
             self._listen_task = asyncio.create_task(
-                self._zwave_client.listen(), name="zwave_listen"
+                self._zwave_client.listen(driver_ready), name="zwave_listen"
             )
 
-            # If driver is already ready (reconnect case) we're done.
-            if self._zwave_client.driver:
+            try:
+                await asyncio.wait_for(driver_ready.wait(), timeout=30.0)
                 nodes = len(self._zwave_client.driver.controller.nodes)
                 _LOGGER.info("Z-Wave JS driver ready — %d node(s)", nodes)
-                return
-
-            # Poll until listen() populates client.driver (normally < 1s).
-            _LOGGER.info("Waiting for Z-Wave JS driver to become ready …")
-            deadline = asyncio.get_running_loop().time() + 30.0
-            while asyncio.get_running_loop().time() < deadline:
-                await asyncio.sleep(0.5)
-                if self._zwave_client.driver:
-                    nodes = len(self._zwave_client.driver.controller.nodes)
-                    _LOGGER.info("Z-Wave JS driver ready — %d node(s)", nodes)
-                    return
-
-            _LOGGER.error(
-                "Timed out waiting for Z-Wave JS driver ready. "
-                "Lock features will be unavailable until next reconnect."
-            )
-            self._zwave_client = None
+            except asyncio.TimeoutError:
+                _LOGGER.error(
+                    "Timed out waiting for Z-Wave JS driver ready. "
+                    "Lock features will be unavailable until next reconnect."
+                )
+                self._zwave_client = None
 
         except Exception as exc:
             _LOGGER.error("Failed to connect to Z-Wave JS: %s", exc, exc_info=True)
