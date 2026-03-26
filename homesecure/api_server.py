@@ -151,6 +151,7 @@ class APIServer:
         # Health / ingress
         r.add_get ("/",                                 self._index)
         r.add_get ("/health",                           self._health)
+        r.add_get ("/{tail:.*}",                        self._ingress_catchall)
 
     # ------------------------------------------------------------------ #
     #  State                                                               #
@@ -461,11 +462,34 @@ class APIServer:
     #  Misc                                                                #
     # ------------------------------------------------------------------ #
 
-    async def _index(self, _: web.Request) -> web.Response:
+    async def _index(self, request: web.Request) -> web.Response:
+        """Root handler — returns a minimal status page."""
         return web.Response(
-            text="HomeSecure API v2.0 — see /api/ws for real-time updates",
-            content_type="text/plain",
+            content_type="text/html",
+            text="""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>HomeSecure</title>
+  <meta http-equiv="refresh" content="0; url=/api/state">
+  <style>
+    body { font-family: sans-serif; padding: 40px; background: #1a1a2e; color: #eee; }
+    h2   { color: #667eea; }
+    a    { color: #667eea; }
+  </style>
+</head>
+<body>
+  <h2>HomeSecure v2.0</h2>
+  <p>Container API is running.</p>
+  <p><a href="/api/state">Alarm State</a> &nbsp;|&nbsp;
+     <a href="/health">Health</a></p>
+</body>
+</html>""",
         )
+
+    async def _ingress_catchall(self, request: web.Request) -> web.Response:
+        """Catch ingress-rewritten paths and redirect to root."""
+        raise web.HTTPFound("/")
 
     async def _health(self, _: web.Request) -> web.Response:
         return web.json_response({

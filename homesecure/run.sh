@@ -1,5 +1,5 @@
 #!/usr/bin/with-contenv bashio
-set -e
+# Do NOT use set -e — grep returning no match would kill the script
 
 # ── read addon options ─────────────────────────────────────────────────────
 ZWAVE_URL=$(bashio::config 'zwave_server_url')
@@ -16,16 +16,16 @@ bashio::log.info "======================================================="
 # ── Auto-install / update the HA integration ──────────────────────────────
 INTEGRATION_SRC="/app/custom_components/homesecure"
 INTEGRATION_DST="/config/custom_components/homesecure"
-ADDON_VERSION=$(bashio::addon.version)
+ADDON_VERSION=$(bashio::addon.version 2>/dev/null || grep -m1 '^version:' /app/custom_components/homesecure/../../../config.yaml 2>/dev/null | tr -d '"' | awk '{print $2}' || echo "2.0.0")
 
 _installed_version() {
     local manifest="${INTEGRATION_DST}/manifest.json"
     if [ -f "${manifest}" ]; then
-        grep -o '"version": *"[^"]*"' "${manifest}" | grep -o '[0-9][^"]*' | head -1
+        grep -o '"version": *"[^"]*"' "${manifest}" | grep -o '[0-9][^"]*' | head -1 || true
     fi
 }
 
-INSTALLED_VERSION=$(_installed_version)
+INSTALLED_VERSION=$(_installed_version || true)
 
 if [ -z "${INSTALLED_VERSION}" ]; then
     # Fresh install — not present yet
