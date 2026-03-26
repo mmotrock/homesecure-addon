@@ -3,15 +3,15 @@
     "step": {
       "user": {
         "title": "Connect to HomeSecure Container",
-        "description": "Enter the URL of the HomeSecure container add-on. The container must be running before you continue.",
+        "description": "The URL is auto-detected. Only change it if your setup is non-standard.",
         "data": {
-          "container_url": "Container URL (e.g. http://localhost:8099)",
+          "container_url": "Container URL (e.g. http://c2e9a60a-homesecure:8099)",
           "api_token": "API Token (leave blank if not configured)"
         }
       }
     },
     "error": {
-      "cannot_connect": "Cannot reach the HomeSecure container. Make sure the add-on is running and the URL is correct."
+      "cannot_connect": "Cannot reach the HomeSecure container. Make sure the add-on is running. The URL should be http://c2e9a60a-homesecure:8099"
     },
     "abort": {
       "already_configured": "HomeSecure is already configured"
@@ -23,8 +23,8 @@
         "title": "HomeSecure Options",
         "description": "Update the container connection settings.",
         "data": {
-          "container_url": "Container URL",
-          "api_token": "API Token"
+          "container_url": "Container URL (e.g. http://c2e9a60a-homesecure:8099)",
+          "api_token": "API Token (leave blank if not configured)"
         }
       }
     }

@@ -151,6 +151,7 @@ class APIServer:
         # Health / ingress
         r.add_get ("/",                                 self._index)
         r.add_get ("/health",                           self._health)
+        r.add_get ("/api/{tail:.*}",                    self._api_catchall)
         r.add_get ("/{tail:.*}",                        self._ingress_catchall)
 
     # ------------------------------------------------------------------ #
@@ -487,9 +488,17 @@ class APIServer:
 </html>""",
         )
 
+    async def _api_catchall(self, request: web.Request) -> web.Response:
+        """Return 404 for unknown /api/* paths."""
+        return web.json_response({"error": "Not found"}, status=404)
+
     async def _ingress_catchall(self, request: web.Request) -> web.Response:
-        """Catch ingress-rewritten paths and redirect to root."""
-        raise web.HTTPFound("/")
+        """
+        HA ingress rewrites paths to include its own prefix, e.g.:
+          /api/hassio_ingress/c2e9a60a_homesecure/
+        Strip the prefix and serve the index for any non-API path.
+        """
+        return await self._index(request)
 
     async def _health(self, _: web.Request) -> web.Response:
         return web.json_response({
