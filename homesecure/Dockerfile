@@ -46,6 +46,9 @@ COPY lock_manager.py     /app/
 COPY database.py         /app/
 COPY migrate.py          /app/
 
+# Integration files (copied to /config/custom_components at runtime by run.sh)
+COPY custom_components/ /app/custom_components/
+
 # Lovelace cards (copied to /config/www at runtime by run.sh)
 COPY www/ /app/www/
 
