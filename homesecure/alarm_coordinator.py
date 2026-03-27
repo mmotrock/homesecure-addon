@@ -385,16 +385,17 @@ class AlarmCoordinator:
         has_separate_lock_pin: bool = False,
         lock_pin: Optional[str] = None,
     ) -> Dict[str, Any]:
-        # Bootstrap: if no users exist yet, allow first admin creation without a PIN
+        # Bootstrap: if no users exist yet, allow first admin creation freely.
+        # Once any user exists, an admin PIN is always required.
         existing_users = self.database.get_users()
         if existing_users:
             admin = self._authenticate_service(admin_pin)
             if not admin or not admin.get("is_admin"):
                 return {"success": False, "message": "Admin authentication required"}
         else:
-            # First user must be an admin
+            # No users yet — first user is automatically an admin
             is_admin = True
-            _LOGGER.info("Bootstrap: creating first admin user (no existing users)")
+            _LOGGER.info("Bootstrap: creating first admin user (no PIN required)")
 
         # H5: validate name length
         if not name or len(name.strip()) == 0:

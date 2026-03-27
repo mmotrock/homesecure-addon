@@ -37,7 +37,6 @@ class HomeSecureAdmin extends HTMLElement {
     };
     this._eventsLoaded = false;
     this._pendingRequirePin = undefined;  // tracks unsaved toggle state on Security tab
-    this._bootstrapActive = false;  // true when no users exist and bootstrap PIN is set
     this._bootstrapChecked = false; // prevent repeated checks
     // Load lockout state from localStorage
     this.loadLockoutState();
@@ -109,12 +108,6 @@ class HomeSecureAdmin extends HTMLElement {
       this.entity = hass.states[this.config.entity];
     }
     
-    // Check bootstrap status once on first load
-    if (this.entity && !this._bootstrapChecked) {
-      this._bootstrapChecked = true;
-      this.checkBootstrap();
-    }
-
     // Only load users once when first authenticated
     if (this.entity && this._authenticated && !this._usersLoaded) {
       this._usersLoaded = true;
@@ -805,10 +798,6 @@ class HomeSecureAdmin extends HTMLElement {
   renderContent() {
     if (this._lockedUntil && new Date() < this._lockedUntil) {
       return this.renderLockedOut();
-    }
-
-    if (this._bootstrapActive) {
-      return this.renderBootstrap();
     }
 
     if (!this._authenticated) {

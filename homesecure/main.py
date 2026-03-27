@@ -34,6 +34,7 @@ def _get_or_create_service_pin(db: AlarmDatabase) -> str:
     return pin
 
 
+
 async def _broadcast_loop(event_queue: asyncio.Queue, api_server: APIServer) -> None:
     """Relay coordinator events to all connected WebSocket clients."""
     while True:
