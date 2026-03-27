@@ -39,7 +39,7 @@ class HomeSecureConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             token      = user_input.get("api_token") or None
             admin_name = user_input.get("admin_name", "").strip()
             admin_pin  = user_input.get("admin_pin", "")
-            confirm    = user_input.get("confirm_pin", "")
+            confirm    = user_input.get("pin_confirm", "")
 
             # Validate PIN format
             if not admin_pin.isdigit():
@@ -47,7 +47,7 @@ class HomeSecureConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             elif not (6 <= len(admin_pin) <= 8):
                 errors["admin_pin"] = "pin_length"
             elif admin_pin != confirm:
-                errors["confirm_pin"] = "pin_mismatch"
+                errors["pin_confirm"] = "pin_mismatch"
 
             if not errors:
                 # Verify we can reach the container
@@ -80,8 +80,8 @@ class HomeSecureConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required("container_url", default=DEFAULT_URL):  cv.string,
                 vol.Optional("api_token",     default=""):           cv.string,
                 vol.Optional("admin_name",    default="Admin"):      cv.string,
-                vol.Required("admin_pin"):                           cv.string,
-                vol.Required("confirm_pin"):                         cv.string,
+                vol.Required("admin_pin",    default=""):          cv.string,
+                vol.Required("pin_confirm", default=""):            cv.string,
             }),
             errors=errors,
             description_placeholders={

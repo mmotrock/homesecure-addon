@@ -139,8 +139,9 @@ class APIServer:
 
         r.add_get ("/api/locks",                        self._get_locks)
         r.add_post("/api/locks/sync",                   self._sync_locks)
-        r.add_get ("/api/locks/users/{user_id}",        self._get_user_lock_status)
-        r.add_post("/api/locks/users/{user_id}/enable", self._set_user_lock_enabled)
+        r.add_get ("/api/locks/users/{user_id}",          self._get_user_lock_status)
+        r.add_post("/api/locks/users/{user_id}/enable",   self._set_user_lock_enabled)
+        r.add_get ("/api/locks/users/{user_id}/pin",      self._get_user_lock_pin)
 
         r.add_get ("/api/logs",                         self._get_logs)
         r.add_get ("/api/config",                       self._get_config)
@@ -364,6 +365,23 @@ class APIServer:
             return web.json_response({"error": "Admin authentication required"}, status=403)
         results = await self.lock_manager.sync_all_users()
         return web.json_response(results)
+
+    async def _get_user_lock_pin(self, request: web.Request) -> web.Response:
+        """GET /api/locks/users/{user_id}/pin
+        Reads the PIN directly from the Z-Wave lock hardware for this user.
+        Requires admin auth. Returns null if the user has no lock slot or
+        Z-Wave is unavailable.
+        """
+        if not _check_auth(request): return _auth_error()
+        # Admin PIN required — passed as query param ?admin_pin=xxxx
+        admin_pin = request.rel_url.query.get("admin_pin", "")
+        cfg = self.database.get_config()
+        from alarm_coordinator import AlarmCoordinator
+        if not self.coordinator._authenticate_service(admin_pin):
+            return web.json_response({"success": False, "message": "Admin authentication required"}, status=401)
+        user_id = int(request.match_info["user_id"])
+        pin = await self.lock_manager.get_user_pin_from_lock(user_id)
+        return web.json_response({"success": True, "pin": pin})
 
     async def _get_user_lock_status(self, request: web.Request) -> web.Response:
         if not _check_auth(request): return _auth_error()

@@ -2436,10 +2436,41 @@ class HomeSecureAdmin extends HTMLElement {
       });
     });
 
-    // Retrieve LOCK PIN button
+    // Retrieve LOCK PIN button — reads directly from Z-Wave hardware
     this.shadowRoot.querySelectorAll('[data-action="retrieve-lock-pin"]').forEach(el => {
-      el.addEventListener('click', () => {
-        this.showNotification('Lock PIN retrieval is not available — PINs are stored as one-way hashes', 'info');
+      el.addEventListener('click', async () => {
+        if (!this._selectedUser) return;
+        const userId = this._selectedUser.id;
+
+        if (!this._selectedUser.slot_number) {
+          this.showNotification('This user has no lock slot assigned yet — save the user first.', 'warning');
+          return;
+        }
+
+        this._selectedUser._retrievingLockPin = true;
+        this._selectedUser._lockPinRetrieveError = null;
+        this.render();
+
+        try {
+          const data = await this._apiFetch(
+            `/api/locks/users/${userId}/pin?admin_pin=${encodeURIComponent(this._adminPin)}`
+          );
+          if (data.success && data.pin) {
+            this._selectedUser._retrievedLockPin = data.pin;
+            this._selectedUser._retrievingLockPin = false;
+            this.showNotification('Lock PIN retrieved from Z-Wave hardware.', 'success');
+          } else {
+            this._selectedUser._retrievingLockPin = false;
+            this._selectedUser._lockPinRetrieveError =
+              data.pin === null
+                ? 'No PIN found in lock for this slot. The lock may be offline.'
+                : (data.message || 'Could not retrieve PIN.');
+          }
+        } catch (e) {
+          this._selectedUser._retrievingLockPin = false;
+          this._selectedUser._lockPinRetrieveError = e.message;
+        }
+        this.render();
       });
     });
 
