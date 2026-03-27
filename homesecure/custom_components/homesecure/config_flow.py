@@ -1,7 +1,7 @@
 """
 HomeSecure HA Integration — config_flow
-Collects the container URL and optional API token.
-Auto-detects the supervisor internal addon URL when possible.
+Collects container URL, API token, and creates the first admin user
+during setup so no separate bootstrap step is needed.
 """
 import logging
 from typing import Any
@@ -18,30 +18,11 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-# Internal supervisor URL — works from within the HA network without needing
-# the addon slug. Falls back to this if supervisor token is unavailable.
 DEFAULT_URL = "http://c2e9a60a-homesecure:8099"
 
 
-async def _detect_container_url(hass) -> str:
-    """Try to auto-detect the container URL via the supervisor API."""
-    try:
-        supervisor_token = hass.auth._store._data.get("supervisor_token") or ""
-        # Try the well-known internal hostname first
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                f"{DEFAULT_URL}/health",
-                timeout=aiohttp.ClientTimeout(total=3),
-            ) as resp:
-                if resp.status == 200:
-                    return DEFAULT_URL
-    except Exception:
-        pass
-    return DEFAULT_URL
-
-
 class HomeSecureConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Config flow — point HA at the HomeSecure container."""
+    """Config flow — connect to container and create first admin user."""
 
     VERSION = 2
 
@@ -54,14 +35,37 @@ class HomeSecureConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             await self.async_set_unique_id(DOMAIN)
             self._abort_if_unique_id_configured()
 
-            url   = user_input["container_url"].rstrip("/")
-            token = user_input.get("api_token") or None
+            url        = user_input["container_url"].rstrip("/")
+            token      = user_input.get("api_token") or None
+            admin_name = user_input.get("admin_name", "").strip()
+            admin_pin  = user_input.get("admin_pin", "")
+            confirm    = user_input.get("confirm_pin", "")
 
-            ok, err = await self._test_connection(url, token)
-            if not ok:
-                errors["container_url"] = "cannot_connect"
-                _LOGGER.warning("Container connection test failed: %s", err)
-            else:
+            # Validate PIN format
+            if admin_pin and not admin_pin.isdigit():
+                errors["admin_pin"] = "pin_digits_only"
+            elif admin_pin and not (6 <= len(admin_pin) <= 8):
+                errors["admin_pin"] = "pin_length"
+            elif admin_pin and admin_pin != confirm:
+                errors["confirm_pin"] = "pin_mismatch"
+
+            if not errors:
+                # Verify we can reach the container
+                ok, err = await self._test_connection(url, token)
+                if not ok:
+                    errors["container_url"] = "cannot_connect"
+                    _LOGGER.warning("Container connection test failed: %s", err)
+
+            if not errors:
+                # If name and PIN provided, try to create the first admin user
+                if admin_name and admin_pin:
+                    created, msg = await self._create_first_user(
+                        url, token, admin_name, admin_pin
+                    )
+                    if not created:
+                        # Not a hard failure — user may already exist
+                        _LOGGER.info("First user creation skipped: %s", msg)
+
                 return self.async_create_entry(
                     title="HomeSecure",
                     data={
@@ -70,16 +74,19 @@ class HomeSecureConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     },
                 )
 
-        # Auto-detect the URL for the default value
-        detected_url = await _detect_container_url(self.hass)
-
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({
-                vol.Required("container_url", default=detected_url): cv.string,
-                vol.Optional("api_token"): cv.string,
+                vol.Required("container_url", default=DEFAULT_URL): cv.string,
+                vol.Optional("api_token"):                          cv.string,
+                vol.Optional("admin_name", default="Admin"):        cv.string,
+                vol.Optional("admin_pin"):                          cv.string,
+                vol.Optional("confirm_pin"):                        cv.string,
             }),
             errors=errors,
+            description_placeholders={
+                "default_url": DEFAULT_URL,
+            },
         )
 
     async def _test_connection(self, url: str, token: str | None) -> tuple[bool, str]:
@@ -95,8 +102,45 @@ class HomeSecureConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     if resp.status == 200:
                         return True, ""
                     return False, f"HTTP {resp.status}"
-        except aiohttp.ClientConnectorError as exc:
+        except Exception as exc:
             return False, str(exc)
+
+    async def _create_first_user(
+        self, url: str, token: str | None, name: str, pin: str
+    ) -> tuple[bool, str]:
+        """Attempt to create the first admin user via the bootstrap path."""
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        try:
+            async with aiohttp.ClientSession() as session:
+                # Check if any users already exist
+                async with session.get(
+                    f"{url}/api/users", headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=5),
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if data.get("users"):
+                            return False, "Users already exist — skipping first-user creation"
+
+                # No users — use bootstrap path (admin_pin ignored server-side)
+                import json
+                payload = json.dumps({
+                    "name":      name,
+                    "pin":       pin,
+                    "admin_pin": pin,   # server accepts any value when no users exist
+                    "is_admin":  True,
+                })
+                async with session.post(
+                    f"{url}/api/users", headers=headers, data=payload,
+                    timeout=aiohttp.ClientTimeout(total=5),
+                ) as resp:
+                    result = await resp.json()
+                    if result.get("success"):
+                        _LOGGER.info("First admin user '%s' created successfully", name)
+                        return True, "Created"
+                    return False, result.get("message", "Unknown error")
         except Exception as exc:
             return False, str(exc)
 
@@ -110,14 +154,13 @@ class HomeSecureOptionsFlow(config_entries.OptionsFlow):
     """Allow changing the container URL and token post-setup."""
 
     def __init__(self, config_entry):
-        """Store config entry — required for HA versions before 2024.x."""
         self.config_entry = config_entry
 
     async def async_step_init(self, user_input=None):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        current_url   = self.config_entry.options.get(
+        current_url = self.config_entry.options.get(
             "container_url",
             self.config_entry.data.get("container_url", DEFAULT_URL),
         )
@@ -129,7 +172,7 @@ class HomeSecureOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema({
-                vol.Required("container_url", default=current_url): cv.string,
-                vol.Optional("api_token", default=current_token): cv.string,
+                vol.Required("container_url", default=current_url):   cv.string,
+                vol.Optional("api_token",     default=current_token): cv.string,
             }),
         )

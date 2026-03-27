@@ -149,6 +149,7 @@ class APIServer:
         r.add_get ("/api/ws",                           self._websocket_handler)
 
         # Health / ingress
+        r.add_get ("/api/bootstrap",                  self._get_bootstrap)
         r.add_get ("/",                                 self._index)
         r.add_get ("/health",                           self._health)
         r.add_get ("/api/{tail:.*}",                    self._api_catchall)
@@ -463,40 +464,63 @@ class APIServer:
     #  Misc                                                                #
     # ------------------------------------------------------------------ #
 
+    async def _get_bootstrap(self, _: web.Request) -> web.Response:
+        """Return bootstrap status — whether a first-run PIN is active."""
+        cfg = self.database.get_config()
+        users = self.database.get_users()
+        active = len(users) == 0 and bool(cfg.get("bootstrap_pin"))
+        return web.json_response({"bootstrap_active": active})
+
     async def _index(self, request: web.Request) -> web.Response:
-        """Root handler — returns a minimal status page."""
+        """
+        Root handler — plain status page, no redirects.
+        HA ingress opens this when the sidebar button is clicked.
+        The real UI is the homesecure-card / homesecure-admin Lovelace cards.
+        """
+        ingress_path = request.headers.get("X-Ingress-Path", "")
+        base = ingress_path.rstrip("/") if ingress_path else ""
         return web.Response(
             content_type="text/html",
-            text="""<!DOCTYPE html>
+            text=f"""<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
   <title>HomeSecure</title>
-  <meta http-equiv="refresh" content="0; url=/api/state">
   <style>
-    body { font-family: sans-serif; padding: 40px; background: #1a1a2e; color: #eee; }
-    h2   { color: #667eea; }
-    a    { color: #667eea; }
+    body {{ font-family: sans-serif; padding: 40px; background: #1a1a2e; color: #eee; margin: 0; }}
+    h2   {{ color: #667eea; margin-bottom: 8px; }}
+    p    {{ color: #aaa; margin: 4px 0; }}
+    a    {{ color: #667eea; text-decoration: none; }}
+    a:hover {{ text-decoration: underline; }}
+    .card {{ background: #16213e; border-radius: 12px; padding: 24px;
+             max-width: 480px; margin: 60px auto; }}
+    .status {{ color: #10b981; font-weight: 600; }}
   </style>
 </head>
 <body>
-  <h2>HomeSecure v2.0</h2>
-  <p>Container API is running.</p>
-  <p><a href="/api/state">Alarm State</a> &nbsp;|&nbsp;
-     <a href="/health">Health</a></p>
+  <div class="card">
+    <h2>🛡️ HomeSecure v2.0</h2>
+    <p class="status">✓ Container API is running</p>
+    <br>
+    <p>The UI is accessed via the <strong>Lovelace cards</strong> added to your dashboard.</p>
+    <br>
+    <p>
+      <a href="{base}/health">Health check</a> &nbsp;|&nbsp;
+      <a href="{base}/api/state">Alarm state (JSON)</a>
+    </p>
+  </div>
 </body>
 </html>""",
         )
 
     async def _api_catchall(self, request: web.Request) -> web.Response:
-        """Return 404 for unknown /api/* paths."""
+        """Return 404 JSON for unknown /api/* paths."""
         return web.json_response({"error": "Not found"}, status=404)
 
     async def _ingress_catchall(self, request: web.Request) -> web.Response:
         """
-        HA ingress rewrites paths to include its own prefix, e.g.:
-          /api/hassio_ingress/c2e9a60a_homesecure/
-        Strip the prefix and serve the index for any non-API path.
+        Catch any path that HA ingress rewrites and serve the index.
+        Ingress sets X-Ingress-Path so _index can build correct links.
         """
         return await self._index(request)
 
