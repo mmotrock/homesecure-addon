@@ -2,19 +2,25 @@
   "config": {
     "step": {
       "user": {
-        "title": "Connect to HomeSecure Container",
-        "description": "Enter the URL of the HomeSecure container add-on. The container must be running before you continue.",
+        "title": "Connect to HomeSecure",
+        "description": "Enter the container URL and create your first admin user. The URL is pre-filled with the standard addon address.",
         "data": {
-          "container_url": "Container URL (e.g. http://localhost:8099)",
-          "api_token": "API Token (leave blank if not configured)"
+          "container_url": "Container URL",
+          "api_token":     "API Token (leave blank if not configured)",
+          "admin_name":    "Your Name (for first admin user)",
+          "admin_pin":     "Admin PIN (6–8 digits)",
+          "confirm_pin":   "Confirm Admin PIN"
         }
       }
     },
     "error": {
-      "cannot_connect": "Cannot reach the HomeSecure container. Make sure the add-on is running and the URL is correct."
+      "cannot_connect":  "Cannot reach the HomeSecure container. Make sure the add-on is running.",
+      "pin_digits_only": "PIN must contain digits only.",
+      "pin_length":      "PIN must be 6–8 digits.",
+      "pin_mismatch":    "PINs do not match."
     },
     "abort": {
-      "already_configured": "HomeSecure is already configured"
+      "already_configured": "HomeSecure is already configured."
     }
   },
   "options": {
@@ -24,7 +30,7 @@
         "description": "Update the container connection settings.",
         "data": {
           "container_url": "Container URL",
-          "api_token": "API Token"
+          "api_token":     "API Token"
         }
       }
     }

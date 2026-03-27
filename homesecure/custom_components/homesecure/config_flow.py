@@ -42,11 +42,11 @@ class HomeSecureConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             confirm    = user_input.get("confirm_pin", "")
 
             # Validate PIN format
-            if admin_pin and not admin_pin.isdigit():
+            if not admin_pin.isdigit():
                 errors["admin_pin"] = "pin_digits_only"
-            elif admin_pin and not (6 <= len(admin_pin) <= 8):
+            elif not (6 <= len(admin_pin) <= 8):
                 errors["admin_pin"] = "pin_length"
-            elif admin_pin and admin_pin != confirm:
+            elif admin_pin != confirm:
                 errors["confirm_pin"] = "pin_mismatch"
 
             if not errors:
@@ -77,11 +77,11 @@ class HomeSecureConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({
-                vol.Required("container_url", default=DEFAULT_URL): cv.string,
-                vol.Optional("api_token"):                          cv.string,
-                vol.Optional("admin_name", default="Admin"):        cv.string,
-                vol.Optional("admin_pin"):                          cv.string,
-                vol.Optional("confirm_pin"):                        cv.string,
+                vol.Required("container_url", default=DEFAULT_URL):  cv.string,
+                vol.Optional("api_token",     default=""):           cv.string,
+                vol.Optional("admin_name",    default="Admin"):      cv.string,
+                vol.Required("admin_pin"):                           cv.string,
+                vol.Required("confirm_pin"):                         cv.string,
             }),
             errors=errors,
             description_placeholders={

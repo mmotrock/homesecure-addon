@@ -37,6 +37,8 @@ class HomeSecureAdmin extends HTMLElement {
     };
     this._eventsLoaded = false;
     this._pendingRequirePin = undefined;  // tracks unsaved toggle state on Security tab
+    this._bootstrapActive = false;  // true when no users exist and bootstrap PIN is set
+    this._bootstrapChecked = false; // prevent repeated checks
     // Load lockout state from localStorage
     this.loadLockoutState();
   }
@@ -107,6 +109,12 @@ class HomeSecureAdmin extends HTMLElement {
       this.entity = hass.states[this.config.entity];
     }
     
+    // Check bootstrap status once on first load
+    if (this.entity && !this._bootstrapChecked) {
+      this._bootstrapChecked = true;
+      this.checkBootstrap();
+    }
+
     // Only load users once when first authenticated
     if (this.entity && this._authenticated && !this._usersLoaded) {
       this._usersLoaded = true;
@@ -126,6 +134,73 @@ class HomeSecureAdmin extends HTMLElement {
 
   getCardSize() {
     return 6;
+  }
+
+  async checkBootstrap() {
+    try {
+      const data = await this._apiFetch('/api/bootstrap');
+      this._bootstrapActive = data.bootstrap_active === true;
+      if (this._bootstrapActive) {
+        this._bootstrapUser = { name: '', pin: '', confirmPin: '' };
+        this.render();
+      }
+    } catch (e) {
+      console.error('Bootstrap check failed:', e);
+    }
+  }
+
+  renderBootstrap() {
+    return `
+      <ha-card>
+        <div class="admin-container">
+          ${this.renderHeader()}
+          <div class="admin-body">
+            <div class="pin-auth" style="max-width: 480px; margin: 0 auto; padding: 32px 20px;">
+              <div class="pin-display" style="margin-bottom: 24px;">
+                <div class="pin-label" style="font-size: 20px; margin-bottom: 8px;">🎉 Welcome to HomeSecure</div>
+                <div class="pin-sublabel" style="font-size: 14px; line-height: 1.6;">
+                  No users exist yet. Check the <strong>addon logs</strong> for your one-time
+                  bootstrap PIN, then create your first admin user below.
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Bootstrap PIN (from addon logs) *</label>
+                <input type="password" class="form-input" id="bootstrap-pin"
+                       placeholder="Enter bootstrap PIN from logs" maxlength="8">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Your Name *</label>
+                <input type="text" class="form-input" id="bootstrap-name"
+                       placeholder="e.g. Admin">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Choose your Admin PIN (6–8 digits) *</label>
+                <input type="password" class="form-input" id="bootstrap-new-pin"
+                       placeholder="6–8 digit PIN you will use to log in" maxlength="8">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Confirm Admin PIN *</label>
+                <input type="password" class="form-input" id="bootstrap-confirm-pin"
+                       placeholder="Re-enter your PIN" maxlength="8">
+              </div>
+
+              <div id="bootstrap-error" style="display:none; color:#ef4444; font-size:13px;
+                   margin-bottom: 12px; padding: 10px; background: rgba(239,68,68,0.1);
+                   border-radius: 8px;"></div>
+
+              <button class="btn btn-primary" data-action="bootstrap-create"
+                      style="width: 100%; margin-top: 8px;">
+                Create Admin Account
+              </button>
+            </div>
+          </div>
+        </div>
+      </ha-card>
+    `;
   }
 
   async loadUsers() {
@@ -154,11 +229,7 @@ class HomeSecureAdmin extends HTMLElement {
 
     // Check if locked out - reset if time expired
     const now = new Date();
-    if (this._lockedUntil && now < this._lockedUntil) {
-      console.log('Still locked out');
-      this.renderLockedOut();
-      return;
-    } else if (this._lockedUntil && now >= this._lockedUntil) {
+    if (this._lockedUntil && now >= this._lockedUntil) {
       console.log('Lockout expired, resetting');
       this._lockedUntil = null;
       this._failedAttempts = 0;
@@ -736,6 +807,10 @@ class HomeSecureAdmin extends HTMLElement {
       return this.renderLockedOut();
     }
 
+    if (this._bootstrapActive) {
+      return this.renderBootstrap();
+    }
+
     if (!this._authenticated) {
       return this.renderAuth();
     }
@@ -823,8 +898,13 @@ class HomeSecureAdmin extends HTMLElement {
   }
 
   renderAuth() {
+    // If locked out, render the lockout screen instead
+    if (this._lockedUntil && new Date() < this._lockedUntil) {
+      return this.renderLockedOut();
+    }
+    const maxAttempts = this._config?.max_failed_attempts ?? 5;
     const pinDots = '●'.repeat(this._pin.length) || '●●●●●●';
-    const remainingAttempts = 5 - this._failedAttempts;
+    const remainingAttempts = maxAttempts - this._failedAttempts;
 
     return `
       <ha-card>
@@ -839,7 +919,8 @@ class HomeSecureAdmin extends HTMLElement {
                 <div class="pin-counter">${this._pin.length}/8 digits</div>
                 ${this._failedAttempts > 0 ? `
                   <div class="attempts-warning">
-                    ${remainingAttempts} attempt${remainingAttempts !== 1 ? 's' : ''} remaining
+                    ⚠️ ${remainingAttempts} attempt${remainingAttempts !== 1 ? 's' : ''} remaining
+                    before ${Math.round((this._config?.lockout_duration ?? 300) / 60)}-minute lockout
                   </div>
                 ` : ''}
               </div>
@@ -859,9 +940,11 @@ class HomeSecureAdmin extends HTMLElement {
   }
 
   renderLockedOut() {
-    const timeRemaining = Math.ceil((this._lockedUntil - new Date()) / 1000);
+    const now = new Date();
+    const timeRemaining = Math.max(0, Math.ceil((this._lockedUntil - now) / 1000));
     const minutes = Math.floor(timeRemaining / 60);
     const seconds = timeRemaining % 60;
+    const lockoutMins = Math.round((this._config?.lockout_duration ?? 300) / 60);
 
     return `
       <ha-card>
@@ -872,10 +955,18 @@ class HomeSecureAdmin extends HTMLElement {
               <svg class="locked-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
               </svg>
-              <div class="locked-title">Access Locked</div>
-              <div class="locked-text">Too many failed attempts</div>
-              <div class="locked-text">Please wait before trying again</div>
+              <div class="locked-title">🔒 Access Locked</div>
+              <div class="locked-text" style="font-size:15px; margin-bottom: 4px;">
+                Too many failed PIN attempts.
+              </div>
+              <div class="locked-text" style="font-size:13px; color: var(--secondary-text-color); margin-bottom: 20px;">
+                You have been locked out for ${lockoutMins} minute${lockoutMins !== 1 ? 's' : ''}.
+                Try again when the timer reaches 0:00.
+              </div>
               <div class="locked-timer">${minutes}:${seconds.toString().padStart(2, '0')}</div>
+              <div style="font-size: 12px; color: var(--disabled-text-color); margin-top: 12px;">
+                Lockout duration is configurable in the Security tab.
+              </div>
             </div>
           </div>
         </div>
@@ -1834,6 +1925,52 @@ class HomeSecureAdmin extends HTMLElement {
   }
 
   attachEventListeners() {
+    // Bootstrap first-user creation
+    this.shadowRoot.querySelectorAll('[data-action="bootstrap-create"]').forEach(el => {
+      el.addEventListener('click', async () => {
+        const bootstrapPin = this.shadowRoot.getElementById('bootstrap-pin')?.value || '';
+        const name         = this.shadowRoot.getElementById('bootstrap-name')?.value.trim() || '';
+        const newPin       = this.shadowRoot.getElementById('bootstrap-new-pin')?.value || '';
+        const confirmPin   = this.shadowRoot.getElementById('bootstrap-confirm-pin')?.value || '';
+        const errorEl      = this.shadowRoot.getElementById('bootstrap-error');
+
+        const showErr = (msg) => {
+          errorEl.textContent = msg;
+          errorEl.style.display = 'block';
+        };
+
+        errorEl.style.display = 'none';
+
+        if (!bootstrapPin) return showErr('Enter the bootstrap PIN from the addon logs.');
+        if (!name)         return showErr('Name is required.');
+        if (!newPin.match(/^\d{6,8}$/)) return showErr('Admin PIN must be 6–8 digits.');
+        if (newPin !== confirmPin)       return showErr('PINs do not match.');
+
+        try {
+          const result = await this._apiPost('/api/users', {
+            admin_pin: bootstrapPin,
+            name:      name,
+            pin:       newPin,
+            is_admin:  true,
+          });
+          if (result.success) {
+            this._bootstrapActive = false;
+            this._adminPin = newPin;
+            this._authenticated = true;
+            this._usersLoaded = false;
+            await this.loadUsers();
+            await this.loadLocks();
+            this.showNotification('Admin account created! Welcome to HomeSecure.', 'success');
+            this.render();
+          } else {
+            showErr(result.message || 'Failed to create user. Check the bootstrap PIN.');
+          }
+        } catch (e) {
+          showErr('Error: ' + e.message);
+        }
+      });
+    });
+
     // Auth keypad
     this.shadowRoot.querySelectorAll('[data-action="auth-number"]').forEach(el => {
       el.addEventListener('click', () => {
@@ -2329,14 +2466,18 @@ class HomeSecureAdmin extends HTMLElement {
       });
     });
 
-    // Update lockout timer if locked
-    if (this._lockedUntil && new Date() < this._lockedUntil) {
-      // Clear existing timer
-      if (this._lockoutTimer) {
-        clearTimeout(this._lockoutTimer);
+    // Tick the lockout countdown every second while locked out
+    if (this._lockedUntil) {
+      if (this._lockoutTimer) clearTimeout(this._lockoutTimer);
+      if (new Date() < this._lockedUntil) {
+        this._lockoutTimer = setTimeout(() => this.render(), 1000);
+      } else {
+        // Expired — clear and re-render to restore auth screen
+        this._lockedUntil = null;
+        this._failedAttempts = 0;
+        this.saveLockoutState();
+        this.render();
       }
-      // Set new timer to update every second
-      this._lockoutTimer = setTimeout(() => this.render(), 1000);
     }
   }
 
@@ -2409,8 +2550,10 @@ class HomeSecureAdmin extends HTMLElement {
       console.error('Authentication error:', e);
       this._failedAttempts++;
       this._pin = '';
-      if (this._failedAttempts >= 5) {
-        this._lockedUntil = new Date(Date.now() + 5 * 60 * 1000);
+      const maxAttempts   = this._config?.max_failed_attempts ?? 5;
+      const lockoutSecs   = this._config?.lockout_duration    ?? 300;
+      if (this._failedAttempts >= maxAttempts) {
+        this._lockedUntil = new Date(Date.now() + lockoutSecs * 1000);
       }
       this.saveLockoutState();
       this.render();
