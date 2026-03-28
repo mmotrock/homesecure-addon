@@ -147,23 +147,26 @@ class HomeSecureConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
-        return HomeSecureOptionsFlow(config_entry)
+        return HomeSecureOptionsFlow()
 
 
 class HomeSecureOptionsFlow(config_entries.OptionsFlow):
     """Allow changing the container URL and token post-setup."""
 
+    def __init__(self) -> None:
+        """Initialise with no arguments — HA sets self.config_entry automatically."""
+        super().__init__()
+
     async def async_step_init(self, user_input=None):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        current_url = self.config_entry.options.get(
-            "container_url",
-            self.config_entry.data.get("container_url", DEFAULT_URL),
+        entry = self.config_entry
+        current_url = entry.options.get(
+            "container_url", entry.data.get("container_url", DEFAULT_URL)
         )
-        current_token = self.config_entry.options.get(
-            "api_token",
-            self.config_entry.data.get("api_token", ""),
+        current_token = entry.options.get(
+            "api_token", entry.data.get("api_token", "")
         )
 
         return self.async_show_form(

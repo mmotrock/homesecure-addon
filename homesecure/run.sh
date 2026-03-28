@@ -60,16 +60,16 @@ fi
 
 # ── install Lovelace cards (still lives here) ──────────────────────────────
 bashio::log.info "Installing Lovelace cards …"
-mkdir -p /config/www/homesecure
-cp -f /app/www/homesecure-card.js  /config/www/homesecure/
-cp -f /app/www/homesecure-admin.js /config/www/homesecure/
-bashio::log.info "✓ Cards installed to /config/www/homesecure/"
+mkdir -p /config/www
+cp -f /app/www/homesecure-card.js  /config/www/
+cp -f /app/www/homesecure-admin.js /config/www/
+bashio::log.info "✓ Cards installed to /config/www/"
 
 if [ -f /config/.storage/lovelace_resources ]; then
     if ! grep -q "homesecure-card.js" /config/.storage/lovelace_resources 2>/dev/null; then
         bashio::log.warning "⚠ Add the cards to Lovelace resources:"
-        bashio::log.warning "  /local/homesecure/homesecure-card.js  (JavaScript Module)"
-        bashio::log.warning "  /local/homesecure/homesecure-admin.js (JavaScript Module)"
+        bashio::log.warning "  /local/homesecure-card.js  (JavaScript Module)"
+        bashio::log.warning "  /local/homesecure-admin.js (JavaScript Module)"
     fi
 fi
 
