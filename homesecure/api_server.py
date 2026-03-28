@@ -151,6 +151,7 @@ class APIServer:
 
         # Health / ingress
         r.add_get ("/api/bootstrap",                  self._get_bootstrap)
+        r.add_get ("/api/debug/status",              self._debug_status)
         r.add_get ("/",                                 self._index)
         r.add_get ("/health",                           self._health)
         r.add_get ("/api/{tail:.*}",                    self._api_catchall)
@@ -219,6 +220,12 @@ class APIServer:
         )
         if result["success"]:
             user_id = result["user_id"]
+            # Clear any stale failed attempts so a fresh install isn't locked out
+            self.database.clear_failed_attempts()
+            _LOGGER.info(
+                "User created: id=%d name='%s' is_admin=%s",
+                user_id, body.get("name", ""), body.get("is_admin", False),
+            )
             pin     = body.get("lock_pin") if body.get("has_separate_lock_pin") else body.get("pin")
             if pin:
                 self.lock_manager.cache_pin(user_id, pin)
@@ -328,8 +335,25 @@ class APIServer:
         if not pin:
             return web.json_response({"error": "pin required"}, status=400)
 
+        # Diagnostic logging so failures are visible in addon logs
+        users        = self.database.get_users()
+        locked_out   = self.database.is_locked_out()
+        failed_count = self.database.get_failed_attempts_count()
+        _LOGGER.info(
+            "Auth attempt: %d user(s) in DB, locked_out=%s, failed_attempts=%d",
+            len(users), locked_out, failed_count,
+        )
+
+        if locked_out:
+            _LOGGER.warning("Auth rejected — system is locked out (%d failed attempts)", failed_count)
+            return web.json_response(
+                {"success": False, "error": "Too many failed attempts — system locked out"},
+                status=429,
+            )
+
         user = self.database.authenticate_user(pin)
         if user and user.get("is_admin"):
+            _LOGGER.info("Auth success: user '%s' (id=%d)", user.get("name"), user.get("id"))
             return web.json_response({
                 "success":   True,
                 "is_admin":  True,
@@ -337,11 +361,13 @@ class APIServer:
                 "user_id":   user.get("id"),
             })
         elif user:
+            _LOGGER.warning("Auth rejected: user '%s' is not an admin", user.get("name"))
             return web.json_response(
                 {"success": False, "error": "PIN valid but user is not an admin"},
                 status=403,
             )
         else:
+            _LOGGER.warning("Auth rejected: PIN did not match any enabled admin user")
             return web.json_response(
                 {"success": False, "error": "Invalid PIN"},
                 status=401,
@@ -484,6 +510,22 @@ class APIServer:
     # ------------------------------------------------------------------ #
     #  Misc                                                                #
     # ------------------------------------------------------------------ #
+
+    async def _debug_status(self, _: web.Request) -> web.Response:
+        """Diagnostic endpoint — shows DB state to help debug auth issues.
+        No auth required. Remove or restrict in production if desired."""
+        users        = self.database.get_users()
+        locked_out   = self.database.is_locked_out()
+        failed_count = self.database.get_failed_attempts_count()
+        return web.json_response({
+            "user_count":     len(users),
+            "users":          [{"id": u["id"], "name": u["name"],
+                                "is_admin": u["is_admin"], "enabled": u["enabled"]}
+                               for u in users],
+            "locked_out":     locked_out,
+            "failed_attempts": failed_count,
+            "alarm_state":    self.coordinator.state,
+        })
 
     async def _get_bootstrap(self, _: web.Request) -> web.Response:
         """No auth required — tells the config flow whether first-user setup is needed."""

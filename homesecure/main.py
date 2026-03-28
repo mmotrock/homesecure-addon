@@ -93,12 +93,25 @@ async def main() -> None:
 
     # ── initialise components ─────────────────────────────────────────────
     database    = AlarmDatabase(db_path)
-    users = database.get_users()
+    users        = database.get_users()
+    failed_count = database.get_failed_attempts_count()
+    locked_out   = database.is_locked_out()
     if users:
-        _LOGGER.info("Existing database found — %d user(s) configured", len(users))
+        _LOGGER.info("Existing database — %d user(s) configured", len(users))
+        if locked_out:
+            _LOGGER.warning(
+                "⚠ System is LOCKED OUT (%d failed attempts) — "
+                "clear via GET /api/debug/status or wait for lockout to expire",
+                failed_count,
+            )
     else:
         _LOGGER.warning("Fresh database — no users configured yet")
         _LOGGER.warning("Install the HomeSecure integration to create your first admin user")
+        if failed_count > 0:
+            _LOGGER.warning(
+                "Clearing %d stale failed attempts from previous install", failed_count
+            )
+            database.clear_failed_attempts()
     _get_or_create_service_pin(database)
 
     event_queue = asyncio.Queue()
