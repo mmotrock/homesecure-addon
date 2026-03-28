@@ -486,11 +486,9 @@ class APIServer:
     # ------------------------------------------------------------------ #
 
     async def _get_bootstrap(self, _: web.Request) -> web.Response:
-        """Return bootstrap status — whether a first-run PIN is active."""
-        cfg = self.database.get_config()
+        """No auth required — tells the config flow whether first-user setup is needed."""
         users = self.database.get_users()
-        active = len(users) == 0 and bool(cfg.get("bootstrap_pin"))
-        return web.json_response({"bootstrap_active": active})
+        return web.json_response({"bootstrap_needed": len(users) == 0})
 
     async def _index(self, request: web.Request) -> web.Response:
         """

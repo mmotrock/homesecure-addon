@@ -108,28 +108,29 @@ class HomeSecureConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def _create_first_user(
         self, url: str, token: str | None, name: str, pin: str
     ) -> tuple[bool, str]:
-        """Attempt to create the first admin user via the bootstrap path."""
+        """Create the first admin user via the bootstrap path."""
+        import json as _json
         headers = {"Content-Type": "application/json"}
         if token:
             headers["Authorization"] = f"Bearer {token}"
         try:
             async with aiohttp.ClientSession() as session:
-                # Check if any users already exist
+                # Check bootstrap status — no auth required on this endpoint
                 async with session.get(
-                    f"{url}/api/users", headers=headers,
+                    f"{url}/api/bootstrap",
                     timeout=aiohttp.ClientTimeout(total=5),
                 ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        if data.get("users"):
-                            return False, "Users already exist — skipping first-user creation"
+                    if resp.status != 200:
+                        return False, f"Bootstrap check failed: HTTP {resp.status}"
+                    data = await resp.json()
+                    if not data.get("bootstrap_needed"):
+                        return False, "Users already exist — skipping first-user creation"
 
-                # No users — use bootstrap path (admin_pin ignored server-side)
-                import json
-                payload = json.dumps({
+                # Bootstrap path: admin_pin is ignored server-side when no users exist
+                payload = _json.dumps({
                     "name":      name,
                     "pin":       pin,
-                    "admin_pin": pin,   # server accepts any value when no users exist
+                    "admin_pin": "",
                     "is_admin":  True,
                 })
                 async with session.post(
@@ -138,10 +139,13 @@ class HomeSecureConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ) as resp:
                     result = await resp.json()
                     if result.get("success"):
-                        _LOGGER.info("First admin user '%s' created successfully", name)
+                        _LOGGER.info(
+                            "First admin user '%s' created successfully", name
+                        )
                         return True, "Created"
                     return False, result.get("message", "Unknown error")
         except Exception as exc:
+            _LOGGER.error("_create_first_user error: %s", exc)
             return False, str(exc)
 
     @staticmethod

@@ -59,19 +59,44 @@ else
 fi
 
 # ── install Lovelace cards (still lives here) ──────────────────────────────
-bashio::log.info "Installing Lovelace cards …"
-mkdir -p /config/www
-cp -f /app/www/homesecure-card.js  /config/www/
-cp -f /app/www/homesecure-admin.js /config/www/
-bashio::log.info "✓ Cards installed to /config/www/"
+# ── Install Lovelace cards ─────────────────────────────────────────────────
+CARD_DST="/config/www/community/homesecure"
+bashio::log.info "Installing Lovelace cards to ${CARD_DST} …"
+mkdir -p "${CARD_DST}"
+cp -f /app/www/homesecure-card.js  "${CARD_DST}/"
+cp -f /app/www/homesecure-admin.js "${CARD_DST}/"
+bashio::log.info "✓ Cards installed to ${CARD_DST}"
 
-if [ -f /config/.storage/lovelace_resources ]; then
-    if ! grep -q "homesecure-card.js" /config/.storage/lovelace_resources 2>/dev/null; then
-        bashio::log.warning "⚠ Add the cards to Lovelace resources:"
-        bashio::log.warning "  /local/homesecure-card.js  (JavaScript Module)"
-        bashio::log.warning "  /local/homesecure-admin.js (JavaScript Module)"
+# ── Auto-register Lovelace resources if not already present ────────────────
+RESOURCES_FILE="/config/.storage/lovelace_resources"
+_register_resource() {
+    local url="$1"
+    if [ ! -f "${RESOURCES_FILE}" ]; then
+        # Create the resources file from scratch
+        printf '{"version":1,"key":"lovelace_resources","data":{"items":[]}}'             > "${RESOURCES_FILE}"
     fi
-fi
+    if ! grep -q "${url}" "${RESOURCES_FILE}" 2>/dev/null; then
+        # Use python3 to safely update the JSON
+        python3 - "${RESOURCES_FILE}" "${url}" << 'PYEOF'
+import json, sys, uuid
+path, url = sys.argv[1], sys.argv[2]
+try:
+    data = json.load(open(path))
+    items = data.get("data", {}).get("items", [])
+    items.append({"id": str(uuid.uuid4()), "type": "module", "url": url})
+    data.setdefault("data", {})["items"] = items
+    json.dump(data, open(path, "w"))
+    print(f"Registered: {url}")
+except Exception as e:
+    print(f"Warning: could not register {url}: {e}")
+PYEOF
+    else
+        bashio::log.info "✓ Resource already registered: ${url}"
+    fi
+}
+
+_register_resource "/local/community/homesecure/homesecure-card.js"
+_register_resource "/local/community/homesecure/homesecure-admin.js"
 
 # ── environment for the Python services ───────────────────────────────────
 export DB_PATH="/data/homesecure.db"
