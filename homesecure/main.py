@@ -93,6 +93,12 @@ async def main() -> None:
 
     # ── initialise components ─────────────────────────────────────────────
     database    = AlarmDatabase(db_path)
+    users = database.get_users()
+    if users:
+        _LOGGER.info("Existing database found — %d user(s) configured", len(users))
+    else:
+        _LOGGER.warning("Fresh database — no users configured yet")
+        _LOGGER.warning("Install the HomeSecure integration to create your first admin user")
     _get_or_create_service_pin(database)
 
     event_queue = asyncio.Queue()

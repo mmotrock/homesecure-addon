@@ -956,6 +956,10 @@ class HomeSecureAdmin extends HTMLElement {
               <div style="font-size: 12px; color: var(--disabled-text-color); margin-top: 12px;">
                 Lockout duration is configurable in the Security tab.
               </div>
+              <button class="btn btn-secondary" data-action="clear-lockout"
+                      style="margin-top: 20px; padding: 10px 24px; font-size: 13px;">
+                Clear Lockout (if you restarted the addon)
+              </button>
             </div>
           </div>
         </div>
@@ -1914,6 +1918,16 @@ class HomeSecureAdmin extends HTMLElement {
   }
 
   attachEventListeners() {
+    // Clear lockout — lets user reset browser-side lockout state if addon was restarted
+    this.shadowRoot.querySelectorAll('[data-action="clear-lockout"]').forEach(el => {
+      el.addEventListener('click', () => {
+        this._lockedUntil = null;
+        this._failedAttempts = 0;
+        this.saveLockoutState();
+        this.render();
+      });
+    });
+
     // Bootstrap first-user creation
     this.shadowRoot.querySelectorAll('[data-action="bootstrap-create"]').forEach(el => {
       el.addEventListener('click', async () => {

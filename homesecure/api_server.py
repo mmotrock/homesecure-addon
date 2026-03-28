@@ -201,7 +201,10 @@ class APIServer:
         return web.json_response(safe)
 
     async def _create_user(self, request: web.Request) -> web.Response:
-        if not _check_auth(request): return _auth_error()
+        # Allow unauthenticated access during bootstrap (no users exist yet)
+        users = self.database.get_users()
+        if users and not _check_auth(request):
+            return _auth_error()
         body = await self._json(request)
         result = await self.coordinator.add_user(
             name               = body.get("name", ""),
@@ -313,13 +316,13 @@ class APIServer:
         """
         Validate a PIN without side effects.  Used by the admin card to
         authenticate before performing write operations.
+        Note: PIN auth is never gated by api_token — the PIN IS the credential.
 
         Body:  { "pin": "123456" }
         Returns:
             200 { "success": true,  "is_admin": true,  "user_name": "Admin" }
             401 { "success": false, "error": "Invalid PIN or not an admin" }
         """
-        if not _check_auth(request): return _auth_error()
         body = await self._json(request)
         pin  = body.get("pin", "")
         if not pin:
