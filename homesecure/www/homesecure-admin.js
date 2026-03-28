@@ -60,9 +60,8 @@ class HomeSecureAdmin extends HTMLElement {
         this._lockedUntil = data.lockedUntil ? new Date(data.lockedUntil) : null;
         this._failedAttempts = data.failedAttempts || 0;
         
-        // If lockout time has passed, clear it immediately
-        if (this._lockedUntil && new Date() >= this._lockedUntil) {
-          console.log('Lockout expired on load, clearing');
+        // If lockout time has passed, clear everything
+        if (!this._lockedUntil || new Date() >= this._lockedUntil) {
           this._lockedUntil = null;
           this._failedAttempts = 0;
           this.saveLockoutState();
@@ -108,6 +107,12 @@ class HomeSecureAdmin extends HTMLElement {
       this.entity = hass.states[this.config.entity];
     }
     
+    // Sync lockout state from server on first load
+    if (this.entity && !this._bootstrapChecked) {
+      this._bootstrapChecked = true;
+      this.syncLockoutFromServer();
+    }
+
     // Only load users once when first authenticated
     if (this.entity && this._authenticated && !this._usersLoaded) {
       this._usersLoaded = true;
@@ -127,6 +132,22 @@ class HomeSecureAdmin extends HTMLElement {
 
   getCardSize() {
     return 6;
+  }
+
+  async syncLockoutFromServer() {
+    // Sync lockout state from server so browser localStorage can't get out of sync
+    try {
+      const data = await this._apiFetch('/api/debug/status');
+      if (!data.locked_out) {
+        // Server says not locked out — clear any stale browser state
+        this._lockedUntil = null;
+        this._failedAttempts = 0;
+        this.saveLockoutState();
+        this.render();
+      }
+    } catch (e) {
+      // Non-fatal — ignore
+    }
   }
 
   async checkBootstrap() {
