@@ -39,6 +39,21 @@ function _detectApiUrl(configApiUrl) {
   return `${window.location.protocol}//${window.location.hostname}:8099`;
 }
 
+/**
+ * Shared debug logger — respects the homesecure_debug localStorage flag.
+ * Enable via Admin Panel → General → Debug Mode, or:
+ *   localStorage.setItem('homesecure_debug', '1'); location.reload();
+ * Disable:
+ *   localStorage.removeItem('homesecure_debug'); location.reload();
+ */
+const _hs = {
+  get debug() { return localStorage.getItem('homesecure_debug') === '1'; },
+  log:   function(...a) { if (this.debug) console.log('[HomeSecure]', ...a); },
+  warn:  function(...a) { if (this.debug) console.warn('[HomeSecure]', ...a); },
+  error: function(...a) { console.error('[HomeSecure]', ...a); },
+  info:  function(...a) { if (this.debug) console.info('[HomeSecure]', ...a); },
+};
+
 
 class HomeSecureCard extends HTMLElement {
   constructor() {
@@ -513,7 +528,7 @@ class HomeSecureCard extends HTMLElement {
 
       this.attachEventListeners();
     } catch (error) {
-      console.error('Error rendering badge card:', error);
+      _hs.error('Error rendering badge card:', error);
       // Fallback rendering
       this.shadowRoot.innerHTML = `
         <ha-card>
@@ -572,7 +587,7 @@ class HomeSecureCard extends HTMLElement {
   renderAdmin() {
     // Check if homesecure-admin is defined
     if (!customElements.get('homesecure-admin')) {
-      console.error('homesecure-admin custom element not found');
+      _hs.error('homesecure-admin custom element not found');
       return `
         <ha-card>
           <div style="padding: 20px;">
@@ -598,7 +613,7 @@ class HomeSecureCard extends HTMLElement {
           this.render();
         });
       } catch (error) {
-        console.error('Error creating admin panel:', error);
+        _hs.error('Error creating admin panel:', error);
         // Fallback to showing an error message
         return `
           <ha-card>
@@ -615,7 +630,7 @@ class HomeSecureCard extends HTMLElement {
       try {
         this._adminPanel.hass = this._hass;
       } catch (error) {
-        console.error('Error updating admin panel hass:', error);
+        _hs.error('Error updating admin panel hass:', error);
       }
     }
     
@@ -874,7 +889,7 @@ class HomeSecureCard extends HTMLElement {
             container.appendChild(this._adminPanel);
           }
         } catch (error) {
-          console.error('Error opening admin panel:', error);
+          _hs.error('Error opening admin panel:', error);
           this._showAdmin = false;
           this.render();
         }
@@ -920,7 +935,7 @@ class HomeSecureCard extends HTMLElement {
     // Arm actions
     this.shadowRoot.querySelectorAll('[data-action="arm-home"]').forEach(el => {
       el.addEventListener('click', () => {
-        this._apiCall('/api/arm_home', {}).catch(e => console.error('arm_home failed:', e));
+        this._apiCall('/api/arm_home', {}).catch(e => _hs.error('arm_home failed:', e));
         this._showInterface = false;
         setTimeout(() => this.render(), 300);
       });
@@ -928,7 +943,7 @@ class HomeSecureCard extends HTMLElement {
 
     this.shadowRoot.querySelectorAll('[data-action="arm-away"]').forEach(el => {
       el.addEventListener('click', () => {
-        this._apiCall('/api/arm_away', {}).catch(e => console.error('arm_away failed:', e));
+        this._apiCall('/api/arm_away', {}).catch(e => _hs.error('arm_away failed:', e));
         this._showInterface = false;
         setTimeout(() => this.render(), 300);
       });
@@ -940,7 +955,7 @@ class HomeSecureCard extends HTMLElement {
           const pin = this._pin;
           this._pin = '';
           this._showInterface = false;
-          this._apiCall('/api/disarm', { pin }).catch(e => console.error('disarm failed:', e));
+          this._apiCall('/api/disarm', { pin }).catch(e => _hs.error('disarm failed:', e));
           setTimeout(() => this.render(), 300);
         }
       });

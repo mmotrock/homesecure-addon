@@ -30,4 +30,8 @@ map:
   - share:rw
   - ssl:ro
   - data:rw
+ports:
+  8099/tcp: 8099
+ports_description:
+  8099/tcp: "HomeSecure REST + WebSocket API"
 image: "ghcr.io/mmotrock/homesecure-{arch}"

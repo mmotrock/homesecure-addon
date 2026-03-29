@@ -35,6 +35,21 @@ function _detectApiUrl(configApiUrl) {
   return `${window.location.protocol}//${window.location.hostname}:8099`;
 }
 
+/**
+ * Shared debug logger — respects the homesecure_debug localStorage flag.
+ * Enable via Admin Panel → General → Debug Mode, or:
+ *   localStorage.setItem('homesecure_debug', '1'); location.reload();
+ * Disable:
+ *   localStorage.removeItem('homesecure_debug'); location.reload();
+ */
+const _hs = {
+  get debug() { return localStorage.getItem('homesecure_debug') === '1'; },
+  log:   function(...a) { if (this.debug) console.log('[HomeSecure]', ...a); },
+  warn:  function(...a) { if (this.debug) console.warn('[HomeSecure]', ...a); },
+  error: function(...a) { console.error('[HomeSecure]', ...a); },
+  info:  function(...a) { if (this.debug) console.info('[HomeSecure]', ...a); },
+};
+
 
 class HomeSecureAdmin extends HTMLElement {
   constructor() {
@@ -94,13 +109,9 @@ class HomeSecureAdmin extends HTMLElement {
           this.saveLockoutState();
         }
         
-        console.log('Loaded lockout state:', {
-          lockedUntil: this._lockedUntil,
-          failedAttempts: this._failedAttempts
-        });
       }
     } catch (e) {
-      console.error('Failed to load lockout state:', e);
+      _hs.error('Failed to load lockout state:', e);
     }
   }
 
@@ -111,7 +122,7 @@ class HomeSecureAdmin extends HTMLElement {
         failedAttempts: this._failedAttempts
       }));
     } catch (e) {
-      console.error('Failed to save lockout state:', e);
+      _hs.error('Failed to save lockout state:', e);
     }
   }
 
@@ -144,7 +155,7 @@ class HomeSecureAdmin extends HTMLElement {
     if (this.entity && this._authenticated && !this._usersLoaded) {
       this._usersLoaded = true;
       this.loadUsers().catch(err => {
-        console.error('Failed to load users:', err);
+        _hs.error('Failed to load users:', err);
       });
     }
     
@@ -186,7 +197,7 @@ class HomeSecureAdmin extends HTMLElement {
         this.render();
       }
     } catch (e) {
-      console.error('Bootstrap check failed:', e);
+      _hs.error('Bootstrap check failed:', e);
     }
   }
 
@@ -255,36 +266,26 @@ class HomeSecureAdmin extends HTMLElement {
         lock_pin_display: u.has_separate_lock_pin ? '••••••' : '',
         slot_number: u.slot_number || null
       }));
-      console.log('Loaded users:', this._users.length);
     } catch (e) {
-      console.error('Failed to load users:', e);
+      _hs.error('Failed to load users:', e);
       this._users = [];
     }
   }
 
   render() {
     if (!this.entity) {
-      console.warn('HomeSecureAdmin: No entity found');
       return;
     }
 
     // Check if locked out - reset if time expired
     const now = new Date();
     if (this._lockedUntil && now >= this._lockedUntil) {
-      console.log('Lockout expired, resetting');
       this._lockedUntil = null;
       this._failedAttempts = 0;
       this.saveLockoutState();
     }
 
     try {
-      console.log('HomeSecureAdmin: Rendering', { 
-        authenticated: this._authenticated, 
-        view: this._currentView,
-        usersCount: this._users.length,
-        failedAttempts: this._failedAttempts,
-        lockedUntil: this._lockedUntil
-      });
       
       this.shadowRoot.innerHTML = `
         <style>
@@ -828,8 +829,8 @@ class HomeSecureAdmin extends HTMLElement {
 
       this.attachEventListeners();
     } catch (error) {
-      console.error('Error rendering admin panel:', error);
-      console.error('Stack trace:', error.stack);
+      _hs.error('Error rendering admin panel:', error);
+      _hs.error('Stack trace:', error.stack);
       this.shadowRoot.innerHTML = `
         <ha-card>
           <div style="padding: 20px; color: var(--error-color);">
@@ -1309,7 +1310,7 @@ class HomeSecureAdmin extends HTMLElement {
         this.render();
       }
     } catch (e) {
-      console.error('Failed to load lock access:', e);
+      _hs.error('Failed to load lock access:', e);
       if (this._selectedUser && this._selectedUser.id === userId) {
         this._selectedUser._lockAccessLoading = false;
         this._selectedUser._lockAccess = {};
@@ -1321,7 +1322,6 @@ class HomeSecureAdmin extends HTMLElement {
   async loadUserPin(userId) {
     // PINs are bcrypt-hashed in the container database and cannot be retrieved.
     // This method is intentionally a no-op in v2.0.
-    console.log('loadUserPin: PIN retrieval not supported (bcrypt hashed)');
     if (this._selectedUser && this._selectedUser.id === userId) {
       this._selectedUser._pinLoading = false;
       this._selectedUser._pinFailed = true;
@@ -1612,7 +1612,7 @@ class HomeSecureAdmin extends HTMLElement {
       this._events = data.events || data || [];
       this.render();
     } catch (e) {
-      console.error('Failed to load events:', e);
+      _hs.error('Failed to load events:', e);
       this._events = [];
     }
   }
@@ -1623,7 +1623,7 @@ class HomeSecureAdmin extends HTMLElement {
       const events = data.events || data || [];
       this._eventTypes = [...new Set(events.map(e => e.event_type).filter(Boolean))];
     } catch (e) {
-      console.error('Failed to load event types:', e);
+      _hs.error('Failed to load event types:', e);
       this._eventTypes = [];
     }
   }
@@ -1639,7 +1639,7 @@ class HomeSecureAdmin extends HTMLElement {
       this._eventStats = { total: events.length, by_type: typeCounts };
       this.render();
     } catch (e) {
-      console.error('Failed to load event stats:', e);
+      _hs.error('Failed to load event stats:', e);
     }
   }
 
@@ -1652,7 +1652,7 @@ class HomeSecureAdmin extends HTMLElement {
         state: l.state || 'unknown'
       }));
     } catch (e) {
-      console.error('Failed to load locks:', e);
+      _hs.error('Failed to load locks:', e);
       this._locks = [];
     }
   }
@@ -1946,6 +1946,31 @@ class HomeSecureAdmin extends HTMLElement {
           </div>
         </div>
 
+        <!-- ── Debug Mode ─────────────────────────────────────────────── -->
+        <div style="background: var(--card-background-color); border: 1px solid var(--divider-color); border-radius: 14px; padding: 24px; margin-bottom: 28px;">
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 18px;">
+            <span style="font-size: 22px;">🐛</span>
+            <div>
+              <div style="font-size: 16px; font-weight: 600; color: var(--primary-text-color);">Debug Mode</div>
+              <div style="font-size: 13px; color: var(--secondary-text-color);">Enable verbose browser console logging for both cards</div>
+            </div>
+          </div>
+          <div class="form-group" style="margin-bottom: 0;">
+            <div class="form-toggle" data-action="toggle-debug-mode" style="cursor: pointer;">
+              <div>
+                <div class="toggle-label">Verbose logging</div>
+                <div style="font-size: 12px; color: var(--secondary-text-color); margin-top: 3px;">
+                  When on, both cards log detailed activity to the browser console (F12 → Console).
+                  Turn off when not needed — reload the page after toggling.
+                </div>
+              </div>
+              <div class="toggle-switch ${_hs.debug ? 'active' : ''}" id="debug-mode-toggle" style="flex-shrink: 0; margin-left: 16px;">
+                <div class="toggle-knob"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </div>
     `;
   }
@@ -1958,7 +1983,7 @@ class HomeSecureAdmin extends HTMLElement {
       this._configLoading = false;
       this.render();
     } catch (e) {
-      console.error('Failed to load config:', e);
+      _hs.error('Failed to load config:', e);
       this._configLoading = false;
       this._config = {};
       this.render();
@@ -2143,7 +2168,7 @@ class HomeSecureAdmin extends HTMLElement {
           this.showNotification(`Lock sync interval set to ${minutes} minutes`, 'success');
           this.render();
         } catch (e) {
-          console.error('Failed to set sync interval:', e);
+          _hs.error('Failed to set sync interval:', e);
           this.showNotification('Failed to update sync interval', 'error');
         }
       });
@@ -2175,7 +2200,7 @@ class HomeSecureAdmin extends HTMLElement {
           this.showNotification('Timing settings saved', 'success');
           this.render();
         } catch (e) {
-          console.error('Failed to save timing:', e);
+          _hs.error('Failed to save timing:', e);
           this.showNotification('Failed to save timing settings', 'error');
         }
       });
@@ -2196,7 +2221,7 @@ class HomeSecureAdmin extends HTMLElement {
           this.showNotification(`Event log will be kept for ${days} days`, 'success');
           this.render();
         } catch (e) {
-          console.error('Failed to save log retention:', e);
+          _hs.error('Failed to save log retention:', e);
           this.showNotification('Failed to save log retention', 'error');
         }
       });
@@ -2237,8 +2262,25 @@ class HomeSecureAdmin extends HTMLElement {
           this.showNotification('Security settings saved', 'success');
           this.render();
         } catch (e) {
-          console.error('Failed to save security settings:', e);
+          _hs.error('Failed to save security settings:', e);
           this.showNotification('Failed to save security settings', 'error');
+        }
+      });
+    });
+
+    // ── Toggle: debug mode ──────────────────────────────────────────────────
+    this.shadowRoot.querySelectorAll('[data-action="toggle-debug-mode"]').forEach(el => {
+      el.addEventListener('click', () => {
+        const toggle = this.shadowRoot.getElementById('debug-mode-toggle');
+        if (!toggle) return;
+        if (_hs.debug) {
+          localStorage.removeItem('homesecure_debug');
+          toggle.classList.remove('active');
+          this.showNotification('Debug mode off — reload the page to apply', 'info');
+        } else {
+          localStorage.setItem('homesecure_debug', '1');
+          toggle.classList.add('active');
+          this.showNotification('Debug mode on — reload the page to apply', 'info');
         }
       });
     });
@@ -2311,7 +2353,7 @@ class HomeSecureAdmin extends HTMLElement {
             user.enabled = !user.enabled;
             this.render();
           } catch (e) {
-            console.error('Failed to toggle user:', e);
+            _hs.error('Failed to toggle user:', e);
           }
         }
       });
@@ -2383,7 +2425,7 @@ class HomeSecureAdmin extends HTMLElement {
               this.render();
             }
           } catch (e) {
-            console.error('Failed to verify locks:', e);
+            _hs.error('Failed to verify locks:', e);
             if (this._selectedUser && this._selectedUser.id === userId) {
               this._selectedUser._verifyingLocks = false;
               this._selectedUser._verifyMessage = '❌ Failed to verify locks';
@@ -2409,7 +2451,7 @@ class HomeSecureAdmin extends HTMLElement {
             }
           }, 3000);
         } catch (e) {
-          console.error('Failed to sync to new locks:', e);
+          _hs.error('Failed to sync to new locks:', e);
           this.showNotification('Failed to sync to new locks', 'error');
         }
       });
@@ -2462,7 +2504,7 @@ class HomeSecureAdmin extends HTMLElement {
               'success'
             );
           } catch (e) {
-            console.error('Failed to set lock access:', e);
+            _hs.error('Failed to set lock access:', e);
             
             // Revert optimistic update on error
             if (this._selectedUser._lockAccess && this._selectedUser._lockAccess[lockEntityId]) {
@@ -2629,7 +2671,7 @@ class HomeSecureAdmin extends HTMLElement {
       await this.loadLocks();
       this.render();
     } catch (e) {
-      console.error('Authentication error:', e);
+      _hs.error('Authentication error:', e);
       this._failedAttempts++;
       this._pin = '';
       const maxAttempts   = this._config?.max_failed_attempts ?? 5;
@@ -2666,7 +2708,7 @@ class HomeSecureAdmin extends HTMLElement {
       this.render();
       this.showNotification('User updated successfully', 'success');
     } catch (e) {
-      console.error('Failed to save user:', e);
+      _hs.error('Failed to save user:', e);
       this.showNotification('Failed to save user', 'error');
     }
   }
@@ -2681,7 +2723,7 @@ class HomeSecureAdmin extends HTMLElement {
       this.render();
       this.showNotification('User deleted successfully', 'success');
     } catch (e) {
-      console.error('Failed to delete user:', e);
+      _hs.error('Failed to delete user:', e);
       this.showNotification('Failed to delete user', 'error');
     }
   }
@@ -2751,14 +2793,6 @@ class HomeSecureAdmin extends HTMLElement {
     if (hasErrors) return;
 
     try {
-      console.log('Creating user with data:', {
-        name: this._editingUser.name,
-        has_phone: !!this._editingUser.phone,
-        has_email: !!this._editingUser.email,
-        is_admin: this._editingUser.is_admin,
-        has_separate_lock_pin: this._editingUser.has_separate_lock_pin,
-        has_lock_pin: !!this._editingUser.lock_pin
-      });
 
       const userData = {
         name: this._editingUser.name,
@@ -2786,7 +2820,6 @@ class HomeSecureAdmin extends HTMLElement {
         userData.has_separate_lock_pin = false;
       }
 
-      console.log('Calling add_user service with:', userData);
 
       await this._apiPost('/api/users', { ...userData, admin_pin: this._adminPin });
       await this.loadUsers();
@@ -2798,7 +2831,7 @@ class HomeSecureAdmin extends HTMLElement {
 
       this.showNotification('User created successfully', 'success');
     } catch (e) {
-      console.error('Failed to create user:', e);
+      _hs.error('Failed to create user:', e);
       this.showNotification(`Failed to create user: ${e.message}`, 'error');
     }
   }
