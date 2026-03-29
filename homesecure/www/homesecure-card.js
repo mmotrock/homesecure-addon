@@ -13,6 +13,33 @@
  *   entry_points - list of entry point objects
  */
 
+/**
+ * Detect the best API base URL for the current environment.
+ *
+ * Priority:
+ *  1. Explicit api_url in card config — always wins
+ *  2. HA ingress path detected from window.location — works on LAN + remote
+ *  3. Fallback to same hostname + port 8099 (LAN direct access)
+ */
+function _detectApiUrl(configApiUrl) {
+  if (configApiUrl) return configApiUrl.replace(/\/$/, '');
+
+  // Check if we're being served through HA ingress
+  // Ingress URLs look like: /api/hassio_ingress/c2e9a60a_homesecure[/...]
+  const ingressMatch = window.location.pathname.match(
+    /(\/api\/hassio_ingress\/[^/]+)/
+  );
+  if (ingressMatch) {
+    // Route API calls through the ingress proxy
+    // e.g. /api/hassio_ingress/c2e9a60a_homesecure/api/auth
+    return window.location.origin + ingressMatch[1];
+  }
+
+  // Fallback: direct connection on LAN (won't work externally)
+  return `${window.location.protocol}//${window.location.hostname}:8099`;
+}
+
+
 class HomeSecureCard extends HTMLElement {
   constructor() {
     super();
@@ -20,7 +47,7 @@ class HomeSecureCard extends HTMLElement {
     this._pin = '';
     this._showInterface = false;
     this._showAdmin = false;
-    this._apiUrl = 'http://localhost:8099';
+    this._apiUrl = _detectApiUrl(null);
     this._apiToken = '';
   }
 
@@ -44,7 +71,7 @@ class HomeSecureCard extends HTMLElement {
       card_height: '100%',
       ...config
     };
-    this._apiUrl = (config.api_url || 'http://localhost:8099').replace(/\/$/, '');
+    this._apiUrl = _detectApiUrl(config.api_url);
     this._apiToken = config.api_token || '';
     this.render();
   }
