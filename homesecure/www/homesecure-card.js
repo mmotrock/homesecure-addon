@@ -18,24 +18,22 @@
  *
  * Priority:
  *  1. Explicit api_url in card config — always wins
- *  2. HA ingress path detected from window.location — works on LAN + remote
- *  3. Fallback to same hostname + port 8099 (LAN direct access)
+ *  2. HA ingress path from window.location (sidebar panel URL)
+ *  3. Same hostname as HA + port 8099 (LAN and remote with port exposed)
  */
 function _detectApiUrl(configApiUrl) {
   if (configApiUrl) return configApiUrl.replace(/\/$/, '');
 
-  // Check if we're being served through HA ingress
-  // Ingress URLs look like: /api/hassio_ingress/c2e9a60a_homesecure[/...]
+  // Check if we're being served through HA ingress sidebar panel
   const ingressMatch = window.location.pathname.match(
     /(\/api\/hassio_ingress\/[^/]+)/
   );
   if (ingressMatch) {
-    // Route API calls through the ingress proxy
-    // e.g. /api/hassio_ingress/c2e9a60a_homesecure/api/auth
     return window.location.origin + ingressMatch[1];
   }
 
-  // Fallback: direct connection on LAN (won't work externally)
+  // Use same hostname as HA but on port 8099
+  // Works on LAN and any reverse proxy that also exposes port 8099
   return `${window.location.protocol}//${window.location.hostname}:8099`;
 }
 
