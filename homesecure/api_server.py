@@ -95,7 +95,7 @@ class APIServer:
         self.lock_manager  = lock_manager
         self.database      = database
 
-        self._app  = web.Application(middlewares=[self._error_middleware])
+        self._app  = web.Application(middlewares=[self._cors_middleware, self._error_middleware])
         self._ws_clients: Set[web.WebSocketResponse] = weakref.WeakSet()
 
         self._setup_routes()
@@ -103,6 +103,26 @@ class APIServer:
     # ------------------------------------------------------------------ #
     #  Middleware                                                          #
     # ------------------------------------------------------------------ #
+
+    @web.middleware
+    async def _cors_middleware(self, request: web.Request, handler):
+        """Add CORS headers so browser cards on different ports can call the API."""
+        # Handle preflight OPTIONS requests
+        if request.method == "OPTIONS":
+            return web.Response(
+                status=204,
+                headers={
+                    "Access-Control-Allow-Origin":  "*",
+                    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                    "Access-Control-Max-Age":       "3600",
+                },
+            )
+        response = await handler(request)
+        response.headers["Access-Control-Allow-Origin"]  = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        return response
 
     @web.middleware
     async def _error_middleware(self, request: web.Request, handler):
@@ -150,6 +170,7 @@ class APIServer:
         r.add_get ("/api/ws",                           self._websocket_handler)
 
         # Health / ingress
+        r.add_route("OPTIONS", "/{tail:.*}",         self._options_handler)
         r.add_get ("/api/bootstrap",                  self._get_bootstrap)
         r.add_get ("/api/debug/status",              self._debug_status)
         r.add_get ("/",                                 self._index)
@@ -526,6 +547,18 @@ class APIServer:
             "failed_attempts": failed_count,
             "alarm_state":    self.coordinator.state,
         })
+
+    async def _options_handler(self, _: web.Request) -> web.Response:
+        """Handle CORS preflight OPTIONS requests for all routes."""
+        return web.Response(
+            status=204,
+            headers={
+                "Access-Control-Allow-Origin":  "*",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                "Access-Control-Max-Age":       "3600",
+            },
+        )
 
     async def _get_bootstrap(self, _: web.Request) -> web.Response:
         """No auth required — tells the config flow whether first-user setup is needed."""
