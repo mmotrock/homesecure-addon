@@ -472,7 +472,11 @@ class AlarmDatabase:
                     values,
                 )
                 conn.commit()
-                self.log_event("config_updated", details=json.dumps(updates))
+                # Only log user-visible config changes, not internal system keys
+                _INTERNAL_KEYS = {"service_pin", "bootstrap_pin"}
+                user_updates = {k: v for k, v in updates.items() if k not in _INTERNAL_KEYS}
+                if user_updates:
+                    self.log_event("config_updated", details=json.dumps(user_updates))
                 return True
             except Exception as exc:
                 _LOGGER.error("update_config error: %s", exc)

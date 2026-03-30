@@ -256,7 +256,9 @@ class HomeSecureAdmin extends HTMLElement {
   async loadUsers() {
     try {
       const data = await this._apiFetch('/api/users');
-      this._users = (data.users || []).map(u => ({
+      // Handle both {"users": [...]} and bare [...] formats
+      const list = Array.isArray(data) ? data : (data.users || []);
+      this._users = list.map(u => ({
         ...u,
         is_admin: Boolean(u.is_admin),
         enabled: Boolean(u.enabled !== 0),
@@ -264,6 +266,7 @@ class HomeSecureAdmin extends HTMLElement {
         lock_pin_display: u.has_separate_lock_pin ? '••••••' : '',
         slot_number: u.slot_number || null
       }));
+      this.render();
     } catch (e) {
       _hs.error('Failed to load users:', e);
       this._users = [];

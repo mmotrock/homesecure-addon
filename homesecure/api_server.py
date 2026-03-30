@@ -220,7 +220,7 @@ class APIServer:
         users = self.database.get_users()
         # Never expose pin hashes
         safe = [{k: v for k, v in u.items() if "hash" not in k} for u in users]
-        return web.json_response(safe)
+        return web.json_response({"users": safe})
 
     async def _create_user(self, request: web.Request) -> web.Response:
         # Allow unauthenticated access during bootstrap (no users exist yet)
