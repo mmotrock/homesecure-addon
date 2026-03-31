@@ -136,11 +136,7 @@ class LockManager:
     async def _discover_locks(self) -> None:
         """
         Discover all Z-Wave nodes that support the DOOR_LOCK command class.
-
-        Without Home Assistant's entity registry we work directly against the
-        Z-Wave JS node list.  We store each lock using the entity_id pattern
-        'lock.<node_id>' so the rest of the code can use string keys as before,
-        and the Lovelace cards / HA integration can map back by node_id.
+        Waits briefly for node values to be populated after driver init.
         """
         self._managed_locks = []
         self._lock_nodes = {}
@@ -149,27 +145,51 @@ class LockManager:
             _LOGGER.warning("Z-Wave JS not available — skipping lock discovery")
             return
 
+        # Wait for node values to be populated — they arrive asynchronously
+        # after the driver reports ready
+        await asyncio.sleep(2.0)
+
         all_nodes = list(self._zwave_client.driver.controller.nodes.items())
         _LOGGER.info("Lock discovery: scanning %d node(s)", len(all_nodes))
 
         for node_id, node in all_nodes:
-            ccs = node.command_classes
-            ccs_list = list(ccs)[:15] if hasattr(ccs, '__iter__') else []
-            ccs_ints  = [int(c) for c in ccs_list if hasattr(c, '__int__')]
+            desc = getattr(node.device_config, "description", f"Node {node_id}")
+            DOOR_LOCK_CC = 98
+            USER_CODE_CC = 99
+            has_door_lock = False
+
+            # Check node.values — value_id format is "nodeId-commandClassId-endpoint-property-propertyKey"
+            # e.g. "4-99-0-userCode-1" for USER_CODE slot 1
+            value_ccs = set()
+            for vid, v in node.values.items():
+                # Parse CC from value_id string (most reliable method)
+                parts = str(vid).split('-')
+                if len(parts) >= 2:
+                    try:
+                        value_ccs.add(int(parts[1]))
+                    except (ValueError, IndexError):
+                        pass
+                # Also check object attributes
+                for attr in ('command_class_id', 'commandClassName'):
+                    val = getattr(v, attr, None)
+                    if isinstance(val, int):
+                        value_ccs.add(val)
+
+            # Also check node.command_classes directly
+            ccs = getattr(node, 'command_classes', set())
+            for c in ccs:
+                cc_int = getattr(c, 'value', None) or (int(c) if isinstance(c, int) else None)
+                if cc_int:
+                    value_ccs.add(cc_int)
+
+            has_door_lock = DOOR_LOCK_CC in value_ccs or USER_CODE_CC in value_ccs
+
             _LOGGER.info(
-                "Node %s (%s): command_classes=%s",
-                node_id,
-                getattr(node.device_config, "description", "unknown"),
-                ccs_ints,
+                "Node %s (%s): %d values, CC ids=%s, has_door_lock=%s",
+                node_id, desc, len(node.values),
+                sorted(value_ccs)[:15], has_door_lock,
             )
 
-            # DOOR_LOCK = 0x62 = 98
-            DOOR_LOCK_CC = 98
-            has_door_lock = (
-                DOOR_LOCK_CC in ccs_ints or
-                any(getattr(c, 'value', None) == DOOR_LOCK_CC for c in ccs_list)
-            )
-            _LOGGER.info("Node %s: has_door_lock=%s", node_id, has_door_lock)
             if not has_door_lock:
                 continue
 
