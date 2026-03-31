@@ -149,8 +149,28 @@ class LockManager:
             _LOGGER.warning("Z-Wave JS not available — skipping lock discovery")
             return
 
-        for node_id, node in self._zwave_client.driver.controller.nodes.items():
-            if CommandClass.DOOR_LOCK not in node.command_classes:
+        all_nodes = list(self._zwave_client.driver.controller.nodes.items())
+        _LOGGER.info("Lock discovery: scanning %d node(s)", len(all_nodes))
+
+        for node_id, node in all_nodes:
+            ccs = node.command_classes
+            ccs_list = list(ccs)[:15] if hasattr(ccs, '__iter__') else []
+            ccs_ints  = [int(c) for c in ccs_list if hasattr(c, '__int__')]
+            _LOGGER.info(
+                "Node %s (%s): command_classes=%s",
+                node_id,
+                getattr(node.device_config, "description", "unknown"),
+                ccs_ints,
+            )
+
+            # DOOR_LOCK = 0x62 = 98
+            DOOR_LOCK_CC = 98
+            has_door_lock = (
+                DOOR_LOCK_CC in ccs_ints or
+                any(getattr(c, 'value', None) == DOOR_LOCK_CC for c in ccs_list)
+            )
+            _LOGGER.info("Node %s: has_door_lock=%s", node_id, has_door_lock)
+            if not has_door_lock:
                 continue
 
             entity_id = f"lock.node_{node_id}"
@@ -307,8 +327,12 @@ class LockManager:
                 _LOGGER.warning("No valid PIN for user %s — skipping sync", user["name"])
                 return
 
+            if not self._managed_locks:
+                _LOGGER.info("No managed locks — skipping lock sync for %s", user["name"])
+                return
+
             slot = self.database.get_user_lock_slot(user_id)
-            if slot is None and self._managed_locks:
+            if slot is None:
                 slot = await self._find_available_slot(self._managed_locks[0])
                 if slot is None:
                     _LOGGER.error("No free lock slots for %s", user["name"])
