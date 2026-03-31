@@ -161,6 +161,7 @@ class APIServer:
         r.add_post("/api/locks/sync",                   self._sync_locks)
         r.add_get ("/api/locks/users/{user_id}",          self._get_user_lock_status)
         r.add_post("/api/locks/users/{user_id}/enable",   self._set_user_lock_enabled)
+        r.add_post("/api/locks/users/{user_id}/verify",   self._verify_user_locks)
         r.add_get ("/api/locks/users/{user_id}/pin",      self._get_user_lock_pin)
 
         r.add_get ("/api/logs",                         self._get_logs)
@@ -438,6 +439,13 @@ class APIServer:
         user_id = int(request.match_info["user_id"])
         status  = await self.lock_manager.get_user_lock_status(user_id)
         return web.json_response(status)
+
+    async def _verify_user_locks(self, request: web.Request) -> web.Response:
+        """Verify actual Z-Wave state against DB for one user."""
+        if not _check_auth(request): return _auth_error()
+        user_id = int(request.match_info["user_id"])
+        result  = await self.lock_manager.verify_user_locks(user_id)
+        return web.json_response(result)
 
     async def _set_user_lock_enabled(self, request: web.Request) -> web.Response:
         if not _check_auth(request): return _auth_error()

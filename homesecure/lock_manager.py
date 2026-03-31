@@ -200,6 +200,8 @@ class LockManager:
             _LOGGER.info("Discovered lock: %s (%s)", entity_id, desc)
 
         _LOGGER.info("Lock discovery complete — %d lock(s)", len(self._managed_locks))
+        if self._managed_locks:
+            await self._populate_pin_cache_from_locks()
 
     # ------------------------------------------------------------------ #
     #  Internal Z-Wave helpers                                             #
@@ -302,6 +304,26 @@ class LockManager:
             self._pin_cache.clear()
         else:
             self._pin_cache.pop(user_id, None)
+
+    async def _populate_pin_cache_from_locks(self) -> None:
+        """Read PINs from locks into cache so operations work after restart."""
+        users = self.database.get_users()
+        populated = 0
+        for user in users:
+            if not user.get("enabled"):
+                continue
+            user_id = user["id"]
+            if user_id in self._pin_cache:
+                continue
+            # Try to read PIN from the first available lock
+            pin = await self.get_user_pin_from_lock(user_id)
+            if pin:
+                self._pin_cache[user_id] = pin
+                populated += 1
+        _LOGGER.info(
+            "PIN cache populated: %d/%d users have cached PINs",
+            populated, len(users),
+        )
 
     async def get_user_pin_from_lock(
         self, user_id: int, entity_id: Optional[str] = None
@@ -422,16 +444,16 @@ class LockManager:
             if enabled:
                 pin = self._pin_cache.get(user_id)
                 if not pin:
-                    for other in self._managed_locks:
-                        if other != entity_id:
-                            pin = await self.get_user_pin_from_lock(user_id, other)
-                            if pin:
-                                break
-                if not pin:
-                    pin = await self.get_user_pin_from_lock(user_id, entity_id)
+                    # Try to read PIN from any lock that has it
+                    for eid in self._managed_locks:
+                        pin = await self.get_user_pin_from_lock(user_id, eid)
+                        if pin:
+                            self._pin_cache[user_id] = pin
+                            break
                 if not pin:
                     self.database.update_lock_sync_status(
-                        user_id, entity_id, False, "No PIN available"
+                        user_id, entity_id, False,
+                        "No PIN available — re-enter the user's PIN to enable lock access"
                     )
                     return
                 success = await self._set_lock_code(entity_id, slot, user["name"], pin)
@@ -496,26 +518,40 @@ class LockManager:
         _LOGGER.info("Periodic lock sync: %s", results)
         return results
 
-    async def _verify_user_lock_access(self, user_id: int) -> Dict[str, Any]:
+    async def verify_user_locks(self, user_id: int) -> Dict[str, Any]:
+        """Check actual Z-Wave state against DB for one user. Updates DB to match."""
         slot = self.database.get_user_lock_slot(user_id)
-        if slot is None:
-            return {"success": False, "differences": []}
         db_access = self.database.get_user_lock_access(user_id)
         differences = []
+        verified = 0
         for eid in self._managed_locks:
             try:
                 pin = await self.get_user_pin_from_lock(user_id, eid)
                 actual = bool(pin)
                 expected = db_access.get(eid, {}).get("enabled", False)
                 if actual != expected:
-                    differences.append(
-                        {"lock": eid, "expected": expected, "actual": actual}
-                    )
+                    differences.append({"lock": eid, "expected": expected, "actual": actual})
                     self.database.set_user_lock_access(user_id, eid, actual)
                 self.database.update_lock_sync_status(user_id, eid, True, None)
+                verified += 1
+                # Update PIN cache if we read a PIN
+                if pin and user_id not in self._pin_cache:
+                    self._pin_cache[user_id] = pin
             except Exception as exc:
                 self.database.update_lock_sync_status(user_id, eid, False, str(exc))
-        return {"success": True, "differences": differences}
+        return {
+            "success": True,
+            "verified_count": verified,
+            "total_locks": len(self._managed_locks),
+            "differences": differences,
+        }
+
+    async def _verify_user_lock_access(self, user_id: int) -> Dict[str, Any]:
+        """Internal — used by periodic sync."""
+        slot = self.database.get_user_lock_slot(user_id)
+        if slot is None:
+            return {"success": False, "differences": []}
+        return await self.verify_user_locks(user_id)
 
     async def get_lock_status(self) -> Dict[str, Any]:
         status: Dict[str, Any] = {

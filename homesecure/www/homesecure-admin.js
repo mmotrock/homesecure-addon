@@ -2392,8 +2392,8 @@ class HomeSecureAdmin extends HTMLElement {
           
           try {
             const result = await Promise.race([
-              this._apiPost('/api/locks/sync', { admin_pin: this._adminPin, user_id: userId }),
-              new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 15000))
+              this._apiPost(`/api/locks/users/${userId}/verify`, {}),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 30000))
             ]);
             
             if (this._selectedUser && this._selectedUser.id === userId) {
@@ -2442,15 +2442,12 @@ class HomeSecureAdmin extends HTMLElement {
     this.shadowRoot.querySelectorAll('[data-action="sync-to-new-locks"]').forEach(el => {
       el.addEventListener('click', async () => {
         const userId = parseInt(el.dataset.userId);
-        
         try {
-          await this._apiPost('/api/locks/sync', { admin_pin: this._adminPin, user_id: userId });
           this.showNotification('Syncing to new locks...', 'info');
-          setTimeout(() => {
-            if (this._selectedUser && this._selectedUser.id === userId) {
-              this.loadUserLockAccess(userId);
-            }
-          }, 3000);
+          // Verify first to detect any new locks, then reload access
+          await this._apiPost(`/api/locks/users/${userId}/verify`, {});
+          await this.loadUserLockAccess(userId);
+          this.showNotification('Sync complete', 'success');
         } catch (e) {
           _hs.error('Failed to sync to new locks:', e);
           this.showNotification('Failed to sync to new locks', 'error');
