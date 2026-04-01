@@ -518,6 +518,21 @@ class LockManager:
         _LOGGER.info("Periodic lock sync: %s", results)
         return results
 
+    async def get_user_lock_status(self, user_id: int) -> Dict[str, Any]:
+        """Return per-lock access state for one user — used by GET /api/locks/users/{id}."""
+        slot      = self.database.get_user_lock_slot(user_id)
+        db_access = self.database.get_user_lock_access(user_id)
+        lock_access = {}
+        for eid in self._managed_locks:
+            access = db_access.get(eid, {})
+            lock_access[eid] = {
+                "enabled":           bool(access.get("enabled", False)),
+                "last_synced":       access.get("last_synced"),
+                "last_sync_success": access.get("last_sync_success"),
+                "last_sync_error":   access.get("last_sync_error"),
+            }
+        return {"slot": slot, "lock_access": lock_access}
+
     async def verify_user_locks(self, user_id: int) -> Dict[str, Any]:
         """Check actual Z-Wave state against DB for one user. Updates DB to match."""
         slot = self.database.get_user_lock_slot(user_id)

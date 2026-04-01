@@ -437,8 +437,12 @@ class APIServer:
     async def _get_user_lock_status(self, request: web.Request) -> web.Response:
         if not _check_auth(request): return _auth_error()
         user_id = int(request.match_info["user_id"])
-        status  = await self.lock_manager.get_user_lock_status(user_id)
-        return web.json_response(status)
+        try:
+            status = await self.lock_manager.get_user_lock_status(user_id)
+            return web.json_response(status)
+        except Exception as exc:
+            _LOGGER.error("get_user_lock_status error: %s", exc, exc_info=True)
+            return web.json_response({"error": str(exc)}, status=500)
 
     async def _verify_user_locks(self, request: web.Request) -> web.Response:
         """Verify actual Z-Wave state against DB for one user."""
