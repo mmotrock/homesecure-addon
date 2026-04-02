@@ -185,22 +185,23 @@ class AlarmCoordinator:
     # ------------------------------------------------------------------ #
 
     async def arm_away(self, pin: str) -> Dict[str, Any]:
-        svc_pin = self._get_service_pin()
-        # H1: constant-time comparison for service PIN
-        if svc_pin and hmac.compare_digest(pin, svc_pin):
-            user = {"id": -1, "name": "Service", "is_admin": True, "is_duress": False}
-        else:
-            # C1: arm operations go through authenticate_user so failed attempts
-            # are rate-limited identically to disarm operations.
-            user = self._authenticate(pin)
-
-        if not user:
-            return {"success": False, "message": "Invalid PIN"}
-
-        cfg = self.database.get_config()
+        cfg         = self.database.get_config()
         require_pin = bool(cfg.get("require_pin_to_arm", False))
-        if require_pin and not user:
+        svc_pin     = self._get_service_pin()
+
+        if svc_pin and pin and hmac.compare_digest(pin, svc_pin):
+            user = {"id": -1, "name": "Service", "is_admin": True, "is_duress": False}
+        elif pin:
+            # PIN provided — validate it (counts as failed attempt if wrong)
+            user = self._authenticate(pin)
+            if not user:
+                return {"success": False, "message": "Invalid PIN"}
+        elif require_pin:
+            # No PIN provided but PIN is required
             return {"success": False, "message": "PIN required to arm"}
+        else:
+            # No PIN, not required — allow anonymous arming
+            user = {"id": -1, "name": "System", "is_admin": False, "is_duress": False}
 
         if self._state in (STATE_ARMED_AWAY, STATE_ARMING):
             return {"success": False, "message": "Already arming or armed away"}
@@ -221,16 +222,20 @@ class AlarmCoordinator:
         return {"success": True, "message": f"Arming away in {exit_delay}s", "delay": exit_delay}
 
     async def arm_home(self, pin: str) -> Dict[str, Any]:
-        svc_pin = self._get_service_pin()
-        # H1: constant-time comparison for service PIN
-        if svc_pin and hmac.compare_digest(pin, svc_pin):
-            user = {"id": -1, "name": "Service", "is_admin": True, "is_duress": False}
-        else:
-            # C1: arm through authenticate_user for rate limiting
-            user = self._authenticate(pin)
+        cfg         = self.database.get_config()
+        require_pin = bool(cfg.get("require_pin_to_arm", False))
+        svc_pin     = self._get_service_pin()
 
-        if not user:
-            return {"success": False, "message": "Invalid PIN"}
+        if svc_pin and pin and hmac.compare_digest(pin, svc_pin):
+            user = {"id": -1, "name": "Service", "is_admin": True, "is_duress": False}
+        elif pin:
+            user = self._authenticate(pin)
+            if not user:
+                return {"success": False, "message": "Invalid PIN"}
+        elif require_pin:
+            return {"success": False, "message": "PIN required to arm"}
+        else:
+            user = {"id": -1, "name": "System", "is_admin": False, "is_duress": False}
 
         if self._state == STATE_ARMED_HOME:
             return {"success": False, "message": "Already armed home"}

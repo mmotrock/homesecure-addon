@@ -208,18 +208,34 @@ class LockManager:
     # ------------------------------------------------------------------ #
 
     def _get_usercode_value(self, node: ZwaveNode, slot: int) -> Optional[ZwaveValue]:
-        for v in node.values.values():
-            if (v.command_class == CommandClass.USER_CODE
-                    and v.property_ == "userCode"
-                    and v.property_key == slot):
+        USER_CODE_CC = 99
+        for vid, v in node.values.items():
+            # Match by value_id string: "nodeId-99-0-userCode-slot"
+            parts = str(vid).split('-')
+            if (len(parts) >= 5
+                    and parts[1] == str(USER_CODE_CC)
+                    and parts[3] == 'userCode'
+                    and parts[4] == str(slot)):
+                return v
+            # Fallback: object attribute check
+            if (getattr(v, 'command_class_id', None) == USER_CODE_CC
+                    and getattr(v, 'property_', None) == 'userCode'
+                    and getattr(v, 'property_key', None) == slot):
                 return v
         return None
 
     def _get_userid_status_value(self, node: ZwaveNode, slot: int) -> Optional[ZwaveValue]:
-        for v in node.values.values():
-            if (v.command_class == CommandClass.USER_CODE
-                    and v.property_ == "userIdStatus"
-                    and v.property_key == slot):
+        USER_CODE_CC = 99
+        for vid, v in node.values.items():
+            parts = str(vid).split('-')
+            if (len(parts) >= 5
+                    and parts[1] == str(USER_CODE_CC)
+                    and parts[3] == 'userIdStatus'
+                    and parts[4] == str(slot)):
+                return v
+            if (getattr(v, 'command_class_id', None) == USER_CODE_CC
+                    and getattr(v, 'property_', None) == 'userIdStatus'
+                    and getattr(v, 'property_key', None) == slot):
                 return v
         return None
 
@@ -231,13 +247,21 @@ class LockManager:
             _LOGGER.error("No Z-Wave node for %s", entity_id)
             return False
         try:
+            # Set status to "Enabled" (1) first
             status_val = self._get_userid_status_value(node, slot)
             if status_val:
                 await node.async_set_value(status_val.value_id, 1)
+                _LOGGER.info("Set slot %d status=1 on %s", slot, entity_id)
 
+            # Set the PIN code
             code_val = self._get_usercode_value(node, slot)
             if not code_val:
-                _LOGGER.error("No usercode value for slot %d on %s", slot, entity_id)
+                _LOGGER.error(
+                    "No usercode value for slot %d on %s — available slots: %s",
+                    slot, entity_id,
+                    [str(vid) for vid in node.values.keys()
+                     if '-99-' in str(vid)][:10],
+                )
                 return False
 
             await node.async_set_value(code_val.value_id, pin)

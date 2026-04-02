@@ -523,7 +523,7 @@ class AlarmDatabase:
         try:
             cfg = self.get_config()
             retention_days = int(cfg.get("log_retention_days", 90))
-            cutoff = datetime.now() - timedelta(days=retention_days)
+            cutoff = datetime.utcnow() - timedelta(days=retention_days)
             # Delete by age first
             conn.execute(
                 f"DELETE FROM {TABLE_EVENTS} WHERE timestamp < ?",
@@ -560,7 +560,7 @@ class AlarmDatabase:
         max_attempts: int = MAX_FAILED_ATTEMPTS,
         lockout_secs: int = LOCKOUT_DURATION,
     ) -> bool:
-        cutoff = datetime.now() - timedelta(seconds=lockout_secs)
+        cutoff = datetime.utcnow() - timedelta(seconds=lockout_secs)
         with self._conn() as conn:
             cur = conn.cursor()
             cur.execute(
@@ -573,7 +573,7 @@ class AlarmDatabase:
         self,
         lockout_secs: int = LOCKOUT_DURATION,
     ) -> int:
-        cutoff = datetime.now() - timedelta(seconds=lockout_secs)
+        cutoff = datetime.utcnow() - timedelta(seconds=lockout_secs)
         with self._conn() as conn:
             cur = conn.cursor()
             cur.execute(
@@ -647,7 +647,7 @@ class AlarmDatabase:
             return [r["event_type"] for r in cur.fetchall()]
 
     def get_event_stats(self, days: int = 7) -> Dict[str, Any]:
-        cutoff = datetime.now() - timedelta(days=days)
+        cutoff = datetime.utcnow() - timedelta(days=days)
         with self._conn() as conn:
             cur = conn.cursor()
             cur.execute(
@@ -714,7 +714,7 @@ class AlarmDatabase:
     ) -> bool:
         bypass_until = None
         if bypassed and bypass_duration:
-            bypass_until = datetime.now() + timedelta(seconds=bypass_duration)
+            bypass_until = datetime.utcnow() + timedelta(seconds=bypass_duration)
         with self._conn() as conn:
             try:
                 conn.execute(

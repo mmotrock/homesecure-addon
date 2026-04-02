@@ -174,6 +174,7 @@ class APIServer:
         r.add_route("OPTIONS", "/{tail:.*}",         self._options_handler)
         r.add_get ("/api/bootstrap",                  self._get_bootstrap)
         r.add_get ("/api/debug/status",              self._debug_status)
+        r.add_post("/api/debug/clear-lockout",       self._debug_clear_lockout)
         r.add_get ("/",                                 self._index)
         r.add_get ("/health",                           self._health)
         r.add_get ("/api/{tail:.*}",                    self._api_catchall)
@@ -571,6 +572,12 @@ class APIServer:
                 "Access-Control-Max-Age":       "3600",
             },
         )
+
+    async def _debug_clear_lockout(self, _: web.Request) -> web.Response:
+        """Clear all failed attempts — useful when locked out due to bugs."""
+        self.database.clear_failed_attempts()
+        _LOGGER.info("Failed attempts cleared via debug endpoint")
+        return web.json_response({"success": True, "message": "Lockout cleared"})
 
     async def _get_bootstrap(self, _: web.Request) -> web.Response:
         """No auth required — tells the config flow whether first-user setup is needed."""
