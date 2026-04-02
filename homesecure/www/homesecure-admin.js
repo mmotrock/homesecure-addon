@@ -287,7 +287,10 @@ class HomeSecureAdmin extends HTMLElement {
     }
 
     try {
-      
+      // Save scroll position before re-render
+      const adminBody = this.shadowRoot.querySelector('.admin-body');
+      const scrollTop = adminBody ? adminBody.scrollTop : 0;
+
       this.shadowRoot.innerHTML = `
         <style>
           :host {
@@ -827,6 +830,12 @@ class HomeSecureAdmin extends HTMLElement {
         </style>
         ${this.renderContent()}
       `;
+
+      // Restore scroll position after re-render
+      if (scrollTop > 0) {
+        const newBody = this.shadowRoot.querySelector('.admin-body');
+        if (newBody) newBody.scrollTop = scrollTop;
+      }
 
       this.attachEventListeners();
     } catch (error) {

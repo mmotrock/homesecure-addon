@@ -417,6 +417,10 @@ class LockManager:
             )
             if synced:
                 self.database.initialize_user_lock_access(user_id, synced)
+            # Persist PIN to DB so re-enable works after container restart
+            if code:
+                self._pin_cache[user_id] = code
+                self.database.set_user_lock_pin_cache(user_id, code)
 
     async def remove_user_from_locks(self, user_id: int) -> None:
         async with self._sync_lock:
@@ -466,22 +470,34 @@ class LockManager:
 
         try:
             if enabled:
+                # Get PIN from cache first, then try to read from any lock
                 pin = self._pin_cache.get(user_id)
                 if not pin:
-                    # Try to read PIN from any lock that has it
                     for eid in self._managed_locks:
                         pin = await self.get_user_pin_from_lock(user_id, eid)
                         if pin:
                             self._pin_cache[user_id] = pin
                             break
                 if not pin:
+                    # Last resort: check if stored in DB lock_pin_cache
+                    stored = self.database.get_user_lock_pin_cache(user_id)
+                    if stored:
+                        pin = stored
+                        self._pin_cache[user_id] = pin
+                if not pin:
                     self.database.update_lock_sync_status(
                         user_id, entity_id, False,
-                        "No PIN available — re-enter the user's PIN to enable lock access"
+                        "No PIN available — save the user again to restore lock access"
                     )
                     return
                 success = await self._set_lock_code(entity_id, slot, user["name"], pin)
             else:
+                # Before clearing, cache the PIN so re-enable works
+                if user_id not in self._pin_cache:
+                    pin = await self.get_user_pin_from_lock(user_id, entity_id)
+                    if pin:
+                        self._pin_cache[user_id] = pin
+                        self.database.set_user_lock_pin_cache(user_id, pin)
                 success = await self._clear_lock_code(entity_id, slot)
 
             self.database.update_lock_sync_status(

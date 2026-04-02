@@ -99,6 +99,7 @@ class AlarmDatabase:
                     email                TEXT,
                     has_separate_lock_pin INTEGER DEFAULT 0,
                     lock_pin_hash        TEXT,
+                    lock_pin_cache       TEXT,
                     created_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     last_used            TIMESTAMP,
                     use_count            INTEGER DEFAULT 0
@@ -223,6 +224,7 @@ class AlarmDatabase:
             }
             migrations = [
                 ("service_pin",         "TEXT"),
+                ("lock_pin_cache",      "TEXT"),
                 ("max_failed_attempts", "INTEGER DEFAULT 5"),
                 ("lockout_duration",    "INTEGER DEFAULT 300"),
                 ("alarm_auto_action",   "TEXT    DEFAULT 'none'"),
@@ -339,6 +341,23 @@ class AlarmDatabase:
             return {"id": -1, "name": "Service", "is_admin": True, "is_duress": False}
         user = self.authenticate_user(pin)
         return user if (user and user.get("is_admin")) else None
+
+    def get_user_lock_pin_cache(self, user_id: int) -> Optional[str]:
+        """Retrieve the cached plaintext lock PIN for lock operations."""
+        with self._conn() as conn:
+            row = conn.execute(
+                f"SELECT lock_pin_cache FROM {TABLE_USERS} WHERE id=?", (user_id,)
+            ).fetchone()
+            return row["lock_pin_cache"] if row else None
+
+    def set_user_lock_pin_cache(self, user_id: int, pin: str) -> None:
+        """Store plaintext lock PIN for re-enable operations after restart."""
+        with self._conn() as conn:
+            conn.execute(
+                f"UPDATE {TABLE_USERS} SET lock_pin_cache=? WHERE id=?",
+                (pin, user_id),
+            )
+            conn.commit()
 
     def get_users(self) -> List[Dict]:
         with self._conn() as conn:
