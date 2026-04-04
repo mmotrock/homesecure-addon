@@ -402,6 +402,7 @@ class AlarmDatabase:
         name: Optional[str] = None,
         pin: Optional[str] = None,
         is_admin: Optional[bool] = None,
+        enabled: Optional[bool] = None,
         phone: Optional[str] = None,
         email: Optional[str] = None,
         has_separate_lock_pin: Optional[bool] = None,
@@ -414,6 +415,8 @@ class AlarmDatabase:
             updates.append("pin_hash=?"); values.append(self.hash_pin(pin))
         if is_admin is not None:
             updates.append("is_admin=?"); values.append(int(is_admin))
+        if enabled is not None:
+            updates.append("enabled=?"); values.append(int(enabled))
         if phone is not None:
             updates.append("phone=?"); values.append(phone)
         if email is not None:

@@ -828,7 +828,9 @@ class HomeSecureCard extends HTMLElement {
     // Update only the PIN display without re-rendering entire card
     const pinDotsEl = this.shadowRoot.querySelector('.pin-dots');
     const pinCounterEl = this.shadowRoot.querySelector('.pin-counter');
-    const enterBtn = this.shadowRoot.querySelector('[data-action="disarm"]');
+    // Handle both disarm and confirm-arm enter buttons
+    const enterBtn = this.shadowRoot.querySelector('[data-action="disarm"]')
+                  || this.shadowRoot.querySelector('[data-action="confirm-arm"]');
     
     if (pinDotsEl) {
       const pinDots = '●'.repeat(this._pin.length) || '●●●●●●';
