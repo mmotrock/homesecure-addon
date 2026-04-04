@@ -149,6 +149,7 @@ class APIServer:
         r.add_get ("/api/users",                        self._get_users)
         r.add_post("/api/users",                        self._create_user)
         r.add_put ("/api/users/{user_id}",              self._update_user)
+        r.add_post("/api/users/{user_id}/remove-from-locks", self._remove_user_from_locks)
         r.add_delete("/api/users/{user_id}",            self._delete_user)
 
         r.add_get ("/api/zones",                        self._get_zones)
@@ -159,6 +160,7 @@ class APIServer:
 
         r.add_get ("/api/locks",                        self._get_locks)
         r.add_post("/api/locks/sync",                   self._sync_locks)
+        r.add_post("/api/locks/sync-user",              self._sync_user_to_locks)
         r.add_get ("/api/locks/users/{user_id}",          self._get_user_lock_status)
         r.add_post("/api/locks/users/{user_id}/enable",   self._set_user_lock_enabled)
         r.add_post("/api/locks/users/{user_id}/verify",   self._verify_user_locks)
@@ -260,6 +262,17 @@ class APIServer:
                     )
                 )
         return web.json_response(result, status=201 if result["success"] else 400)
+
+    async def _remove_user_from_locks(self, request: web.Request) -> web.Response:
+        """Remove a user's codes from all locks — called when disabling a user."""
+        if not _check_auth(request): return _auth_error()
+        user_id = int(request.match_info["user_id"])
+        try:
+            await self.lock_manager.remove_user_from_locks(user_id)
+            return web.json_response({"success": True})
+        except Exception as exc:
+            _LOGGER.error("remove_user_from_locks error: %s", exc)
+            return web.json_response({"error": str(exc)}, status=500)
 
     async def _update_user(self, request: web.Request) -> web.Response:
         if not _check_auth(request): return _auth_error()
@@ -404,6 +417,17 @@ class APIServer:
         if not _check_auth(request): return _auth_error()
         status = await self.lock_manager.get_lock_status()
         return web.json_response(status)
+
+    async def _sync_user_to_locks(self, request: web.Request) -> web.Response:
+        """Sync one user to all locks with a given PIN — used after re-enable."""
+        if not _check_auth(request): return _auth_error()
+        body    = await self._json(request)
+        user_id = int(body.get("user_id", 0))
+        pin     = body.get("pin", "")
+        if not user_id or not pin:
+            return web.json_response({"error": "user_id and pin required"}, status=400)
+        await self.lock_manager.sync_user_to_locks(user_id, pin=pin)
+        return web.json_response({"success": True})
 
     async def _sync_locks(self, request: web.Request) -> web.Response:
         if not _check_auth(request): return _auth_error()

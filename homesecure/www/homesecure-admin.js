@@ -57,6 +57,10 @@ class HomeSecureAdmin extends HTMLElement {
     this._pin = '';
     this._adminPin = null;  // Store authenticated admin PIN
     this._failedAttempts = 0;
+    this._showReenablePin     = false;
+    this._reenablePinUserId   = null;
+    this._reenablePinUserName = '';
+    this._reenablePinValue    = '';
     this._lockedUntil = null;
     this._lockoutKey = 'homesecure_admin_lockout';
     this._currentView = 'auth'; // auth, main, user-list, user-detail, user-add
@@ -104,6 +108,10 @@ class HomeSecureAdmin extends HTMLElement {
         if (!this._lockedUntil || new Date() >= this._lockedUntil) {
           this._lockedUntil = null;
           this._failedAttempts = 0;
+    this._showReenablePin     = false;
+    this._reenablePinUserId   = null;
+    this._reenablePinUserName = '';
+    this._reenablePinValue    = '';
           this.saveLockoutState();
         }
         
@@ -178,6 +186,10 @@ class HomeSecureAdmin extends HTMLElement {
         // Server says not locked out — clear any stale browser state
         this._lockedUntil = null;
         this._failedAttempts = 0;
+    this._showReenablePin     = false;
+    this._reenablePinUserId   = null;
+    this._reenablePinUserName = '';
+    this._reenablePinValue    = '';
         this.saveLockoutState();
         this.render();
       }
@@ -283,6 +295,10 @@ class HomeSecureAdmin extends HTMLElement {
     if (this._lockedUntil && now >= this._lockedUntil) {
       this._lockedUntil = null;
       this._failedAttempts = 0;
+    this._showReenablePin     = false;
+    this._reenablePinUserId   = null;
+    this._reenablePinUserName = '';
+    this._reenablePinValue    = '';
       this.saveLockoutState();
     }
 
@@ -835,6 +851,14 @@ class HomeSecureAdmin extends HTMLElement {
       if (scrollTop > 0) {
         const newBody = this.shadowRoot.querySelector('.admin-body');
         if (newBody) newBody.scrollTop = scrollTop;
+      }
+
+      // Re-enable PIN dialog overlay
+      if (this._showReenablePin) {
+        const overlay = document.createElement('div');
+        overlay.innerHTML = this._renderReenablePinDialog();
+        overlay.style.cssText = 'position:absolute;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);border-radius:inherit;';
+        this.shadowRoot.querySelector('ha-card')?.appendChild(overlay);
       }
 
       this.attachEventListeners();
@@ -2001,11 +2025,18 @@ class HomeSecureAdmin extends HTMLElement {
   }
 
   attachEventListeners() {
+    // Wire up re-enable PIN dialog if it is currently visible
+    if (this._showReenablePin) { this._attachReenablePinListeners(); return; }
+
     // Clear lockout — lets user reset browser-side lockout state if addon was restarted
     this.shadowRoot.querySelectorAll('[data-action="clear-lockout"]').forEach(el => {
       el.addEventListener('click', () => {
         this._lockedUntil = null;
         this._failedAttempts = 0;
+    this._showReenablePin     = false;
+    this._reenablePinUserId   = null;
+    this._reenablePinUserName = '';
+    this._reenablePinValue    = '';
         this.saveLockoutState();
         this.render();
       });
@@ -2351,19 +2382,35 @@ class HomeSecureAdmin extends HTMLElement {
     this.shadowRoot.querySelectorAll('[data-action="toggle-user-enabled"]').forEach(el => {
       el.addEventListener('click', async (e) => {
         e.stopPropagation();
-        const userId = parseInt(el.dataset.userId);
-        const user = this._users.find(u => u.id === userId);
-        
-        if (user) {
+        const userId   = parseInt(el.dataset.userId);
+        const user     = this._users.find(u => u.id === userId);
+        if (!user) return;
+        const enabling = !user.enabled;
+
+        if (enabling) {
+          // Re-enabling — check if we need a PIN to restore lock access
+          await this._reenableUser(user);
+        } else {
+          // Disabling — update user then remove from all locks
           try {
-            await this._apiPost(`/api/users/${userId}`, {
+            await this._apiPut(`/api/users/${userId}`, {
               admin_pin: this._adminPin,
-              enabled: !user.enabled
+              enabled:   false,
             });
-            user.enabled = !user.enabled;
+            user.enabled = false;
+            // Remove lock codes
+            try {
+              await this._apiPost(`/api/users/${userId}/remove-from-locks`, {});
+              this.showNotification(`${user.name} disabled and removed from all locks`, 'info');
+            } catch (lockErr) {
+              _hs.warn('Lock removal error:', lockErr);
+              this.showNotification(`${user.name} disabled (lock removal may be pending)`, 'warning');
+            }
+            await this.loadUsers();
             this.render();
-          } catch (e) {
-            _hs.error('Failed to toggle user:', e);
+          } catch (err) {
+            _hs.error('Failed to disable user:', err);
+            this.showNotification('Failed to disable user', 'error');
           }
         }
       });
@@ -2606,6 +2653,10 @@ class HomeSecureAdmin extends HTMLElement {
         // Expired — clear and re-render to restore auth screen
         this._lockedUntil = null;
         this._failedAttempts = 0;
+    this._showReenablePin     = false;
+    this._reenablePinUserId   = null;
+    this._reenablePinUserName = '';
+    this._reenablePinValue    = '';
         this.saveLockoutState();
         this.render();
       }
@@ -2613,6 +2664,60 @@ class HomeSecureAdmin extends HTMLElement {
   }
 
   // ── Container API helpers ────────────────────────────────────────────────
+
+  // ── Re-enable PIN dialog listeners ──────────────────────────────────────
+  _attachReenablePinListeners() {
+    const overlay = this.shadowRoot.querySelector('[data-action="reenable-pin-number"]')
+      ?.closest('div')?.parentElement;
+
+    this.shadowRoot.querySelectorAll('[data-action="reenable-pin-number"]').forEach(el => {
+      el.addEventListener('click', () => {
+        if (this._reenablePinValue.length < 8) {
+          this._reenablePinValue += el.dataset.value;
+          this.render();
+        }
+      });
+    });
+
+    const clearBtn = this.shadowRoot.querySelector('[data-action="reenable-pin-clear"]');
+    if (clearBtn) clearBtn.addEventListener('click', () => {
+      this._reenablePinValue = '';
+      this.render();
+    });
+
+    const confirmBtn = this.shadowRoot.querySelector('[data-action="reenable-pin-confirm"]');
+    if (confirmBtn) confirmBtn.addEventListener('click', async () => {
+      if (this._reenablePinValue.length < 6) return;
+      const pin    = this._reenablePinValue;
+      const userId = this._reenablePinUserId;
+      this._showReenablePin  = false;
+      this._reenablePinValue = '';
+      try {
+        // Sync user to locks with the provided PIN
+        await this._apiPost(`/api/locks/sync-user`, {
+          admin_pin: this._adminPin,
+          user_id:   userId,
+          pin,
+        });
+        this.showNotification('User re-enabled and synced to locks', 'success');
+      } catch (e) {
+        // Sync failed but user is re-enabled — not fatal
+        _hs.warn('Lock sync on re-enable failed:', e);
+        this.showNotification('User re-enabled (lock sync failed — try Sync to New)', 'warning');
+      }
+      await this.loadUsers();
+      this.render();
+    });
+
+    const cancelBtn = this.shadowRoot.querySelector('[data-action="reenable-pin-cancel"]');
+    if (cancelBtn) cancelBtn.addEventListener('click', async () => {
+      this._showReenablePin  = false;
+      this._reenablePinValue = '';
+      await this.loadUsers();
+      this.render();
+      this.showNotification('User re-enabled without lock sync', 'info');
+    });
+  }
 
   _authHeaders() {
     const h = { 'Content-Type': 'application/json' };
@@ -2658,6 +2763,100 @@ class HomeSecureAdmin extends HTMLElement {
     }
   }
 
+  _renderReenablePinDialog() {
+    const name    = this._reenablePinUserName;
+    const pinDots = '●'.repeat(this._reenablePinValue.length) || '––––––';
+    const nums    = [1,2,3,4,5,6,7,8,9]
+      .map(n => `<button data-action="reenable-pin-number" data-value="${n}"
+                         style="width:64px;height:64px;font-size:20px;font-weight:600;
+                                border:none;border-radius:12px;cursor:pointer;
+                                background:var(--secondary-background-color);
+                                color:var(--primary-text-color);">${n}</button>`)
+      .join('');
+    return `
+      <div style="background:var(--card-background-color);border-radius:16px;padding:28px 24px;
+                  width:320px;box-shadow:0 8px 32px rgba(0,0,0,0.3);">
+        <div style="font-size:17px;font-weight:700;margin-bottom:6px;
+                    color:var(--primary-text-color);">Re-enable ${name}</div>
+        <div style="font-size:13px;color:var(--secondary-text-color);margin-bottom:20px;">
+          Enter ${name}'s PIN to restore lock access
+        </div>
+        <div style="text-align:center;font-size:28px;letter-spacing:8px;
+                    margin-bottom:6px;min-height:40px;">${pinDots}</div>
+        <div style="text-align:center;font-size:12px;color:var(--secondary-text-color);
+                    margin-bottom:16px;">${this._reenablePinValue.length}/8 digits</div>
+        <div style="display:grid;grid-template-columns:repeat(3,64px);gap:8px;
+                    justify-content:center;margin-bottom:16px;">
+          ${nums}
+          <button data-action="reenable-pin-clear"
+                  style="width:64px;height:64px;font-size:18px;border:none;border-radius:12px;
+                         cursor:pointer;background:var(--secondary-background-color);
+                         color:var(--primary-text-color);">✕</button>
+          <button data-action="reenable-pin-number" data-value="0"
+                  style="width:64px;height:64px;font-size:20px;font-weight:600;border:none;
+                         border-radius:12px;cursor:pointer;background:var(--secondary-background-color);
+                         color:var(--primary-text-color);">0</button>
+          <button data-action="reenable-pin-confirm"
+                  ${this._reenablePinValue.length < 6 ? 'disabled' : ''}
+                  style="width:64px;height:64px;font-size:20px;border:none;border-radius:12px;
+                         cursor:pointer;background:${this._reenablePinValue.length >= 6 ? '#10b981' : 'var(--secondary-background-color)'};
+                         color:${this._reenablePinValue.length >= 6 ? 'white' : 'var(--disabled-text-color)'};">✓</button>
+        </div>
+        <button data-action="reenable-pin-cancel"
+                style="width:100%;padding:10px;border:1px solid var(--divider-color);
+                       border-radius:8px;background:transparent;cursor:pointer;
+                       color:var(--secondary-text-color);font-size:13px;">
+          Cancel — skip lock sync
+        </button>
+      </div>`;
+  }
+
+  async _reenableUser(user) {
+    // Re-enable the user account first
+    try {
+      await this._apiPut(`/api/users/${user.id}`, {
+        admin_pin: this._adminPin,
+        enabled:   true,
+      });
+      user.enabled = true;
+    } catch (err) {
+      _hs.error('Failed to re-enable user:', err);
+      this.showNotification('Failed to re-enable user', 'error');
+      return;
+    }
+
+    // Check if there are managed locks — if not, just reload and done
+    const lockStatus = await this._apiFetch(`/api/locks/users/${user.id}`)
+      .catch(() => null);
+    const hasLocks = lockStatus && Object.keys(lockStatus.lock_access || {}).length > 0;
+
+    if (!hasLocks) {
+      this.showNotification(`${user.name} re-enabled`, 'success');
+      await this.loadUsers();
+      this.render();
+      return;
+    }
+
+    // Try to sync to locks — server will use cached PIN if available
+    try {
+      const result = await this._apiPost(`/api/locks/users/${user.id}/verify`, {});
+      if (result.verified_count > 0) {
+        this.showNotification(`${user.name} re-enabled and synced to locks`, 'success');
+        await this.loadUsers();
+        this.render();
+        return;
+      }
+    } catch (e) { /* fall through to PIN prompt */ }
+
+    // No cached PIN available — prompt the admin to enter the user's PIN
+    this._reenablePinUserId   = user.id;
+    this._reenablePinUserName = user.name;
+    this._reenablePinValue    = '';
+    this._showReenablePin     = true;
+    await this.loadUsers();
+    this.render();
+  }
+
   async authenticateAdmin() {
     try {
       // POST /api/auth validates the PIN without side effects
@@ -2669,6 +2868,10 @@ class HomeSecureAdmin extends HTMLElement {
       this._authenticated = true;
       this._usersLoaded = false;
       this._failedAttempts = 0;
+    this._showReenablePin     = false;
+    this._reenablePinUserId   = null;
+    this._reenablePinUserName = '';
+    this._reenablePinValue    = '';
       this._lockedUntil = null;
       this._adminPin = this._pin;
       this._pin = '';

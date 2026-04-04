@@ -60,6 +60,10 @@ class HomeSecureCard extends HTMLElement {
     this._pin = '';
     this._showInterface = false;
     this._showAdmin = false;
+    this._showArmPin = false;
+    this._armAction  = null;
+    this._serverConfig = {};
+    this._configLoaded = false;
     this._apiUrl = _detectApiUrl(null);
     this._apiToken = '';
   }
@@ -93,13 +97,30 @@ class HomeSecureCard extends HTMLElement {
     const oldHass = this._hass;
     this._hass = hass;
     this.entity = hass.states[this.config.entity];
-    
+
+    // Load server config once so we know if PIN is required to arm
+    if (!oldHass && this._apiUrl) this._loadServerConfig();
+
     if (this.entity) {
-      // Only render if not showing admin panel
-      // The admin panel manages its own rendering
       if (!this._showAdmin) {
         this.render();
       }
+    }
+  }
+
+  async _loadServerConfig() {
+    if (this._configLoaded) return;
+    this._configLoaded = true;
+    try {
+      const headers = this._apiToken ? { Authorization: `Bearer ${this._apiToken}` } : {};
+      const resp = await fetch(this._apiUrl + '/api/config', { headers });
+      if (resp.ok) {
+        const json = await resp.json();
+        this._serverConfig = json.config || json || {};
+        _hs.log('Server config loaded:', this._serverConfig);
+      }
+    } catch (e) {
+      _hs.warn('Could not load server config:', e);
     }
   }
 
@@ -674,6 +695,27 @@ class HomeSecureCard extends HTMLElement {
     `;
   }
 
+  renderArmPin() {
+    const label   = this._armAction === 'arm_away' ? 'Arm Away' : 'Arm Home';
+    const pinDots = '●'.repeat(this._pin.length) || '●●●●●●';
+    const nums    = [1,2,3,4,5,6,7,8,9]
+      .map(n => `<button class="key" data-action="number" data-value="${n}">${n}</button>`)
+      .join('');
+    return `
+      <div class="pin-display">
+        <div class="pin-label">Enter PIN to ${label}</div>
+        <div class="pin-dots">${pinDots}</div>
+        <div class="pin-counter">${this._pin.length}/8 digits</div>
+      </div>
+      <div class="keypad">
+        ${nums}
+        <button class="key clear" data-action="clear">✕</button>
+        <button class="key" data-action="number" data-value="0">0</button>
+        <button class="key enter" data-action="confirm-arm"
+                ${this._pin.length < 6 ? 'disabled' : ''}>✓</button>
+      </div>`;
+  }
+
   renderInterface() {
     const state = this.entity.state;
     const isArmed = !['disarmed', 'arming'].includes(state);
@@ -703,21 +745,22 @@ class HomeSecureCard extends HTMLElement {
     `;
 
     if (!isArmed) {
+      const requirePin = !!this._serverConfig.require_pin_to_arm;
       return `
         <ha-card style="height: 100%;">
           <div class="card-content" style="height: 100%; padding-top: ${this.config.container_top_padding || '80px'};">
             <div class="badge-container" style="max-width: ${this.config.container_max_width || '1200px'}; align-self: ${this.config.container_alignment || 'center'};">
               ${badgeHtml}
               <div class="interface-panel">
-                <div class="arm-buttons">
-                  <button class="arm-button blue" data-action="arm-home">
+                ${this._showArmPin ? this.renderArmPin() : `<div class="arm-buttons">`}
+                ${this._showArmPin ? '' : `<button class="arm-button blue" data-action="arm-home">
                     <div style="display: flex; align-items: center; gap: 8px;">
                       <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
                       </svg>
                       <div style="text-align: left;">
                         <div style="font-size: 16px; font-weight: 600;">Arm Home</div>
-                        <div style="font-size: 11px; opacity: 0.8;">Perimeter only</div>
+                        <div style="font-size: 11px; opacity: 0.8;">Perimeter only${requirePin ? ' · PIN required' : ''}</div>
                       </div>
                     </div>
                   </button>
@@ -728,7 +771,7 @@ class HomeSecureCard extends HTMLElement {
                       </svg>
                       <div style="text-align: left;">
                         <div style="font-size: 16px; font-weight: 600;">Arm Away</div>
-                        <div style="font-size: 11px; opacity: 0.8;">All zones + exit delay</div>
+                        <div style="font-size: 11px; opacity: 0.8;">All zones + exit delay${requirePin ? ' · PIN required' : ''}</div>
                       </div>
                     </div>
                   </button>
@@ -742,7 +785,7 @@ class HomeSecureCard extends HTMLElement {
                       </div>
                     </div>
                   </button>
-                </div>
+                </div>`}
               </div>
             </div>
           </div>
@@ -903,20 +946,22 @@ class HomeSecureCard extends HTMLElement {
     });
 
     // Close button
+    // Step 9: close resets arm PIN state too
     this.shadowRoot.querySelectorAll('[data-action="close"]').forEach(el => {
       el.addEventListener('click', () => {
         this._showInterface = false;
-        this._pin = '';
+        this._showArmPin    = false;
+        this._armAction     = null;
+        this._pin           = '';
         this.render();
       });
     });
 
-    // Keypad
+    // Keypad — shared by disarm, arm PIN
     this.shadowRoot.querySelectorAll('[data-action="number"]').forEach(el => {
       el.addEventListener('click', () => {
         if (this._pin.length < 8) {
           this._pin += el.dataset.value;
-          // Only update the PIN display, not the entire card
           this.updatePinDisplay();
         }
       });
@@ -925,25 +970,55 @@ class HomeSecureCard extends HTMLElement {
     this.shadowRoot.querySelectorAll('[data-action="clear"]').forEach(el => {
       el.addEventListener('click', () => {
         this._pin = '';
-        // Only update the PIN display, not the entire card
         this.updatePinDisplay();
       });
     });
 
-    // Arm actions
+    // Steps 6 & 7: arm buttons — show PIN keypad if required, else arm directly
     this.shadowRoot.querySelectorAll('[data-action="arm-home"]').forEach(el => {
       el.addEventListener('click', () => {
-        this._apiCall('/api/arm_home', {}).catch(e => _hs.error('arm_home failed:', e));
-        this._showInterface = false;
-        setTimeout(() => this.render(), 300);
+        if (this._serverConfig.require_pin_to_arm) {
+          this._showArmPin = true;
+          this._armAction  = 'arm_home';
+          this._pin        = '';
+          this.render();
+        } else {
+          this._apiCall('/api/arm_home', {}).catch(e => _hs.error('arm_home failed:', e));
+          this._showInterface = false;
+          setTimeout(() => this.render(), 300);
+        }
       });
     });
 
     this.shadowRoot.querySelectorAll('[data-action="arm-away"]').forEach(el => {
       el.addEventListener('click', () => {
-        this._apiCall('/api/arm_away', {}).catch(e => _hs.error('arm_away failed:', e));
-        this._showInterface = false;
-        setTimeout(() => this.render(), 300);
+        if (this._serverConfig.require_pin_to_arm) {
+          this._showArmPin = true;
+          this._armAction  = 'arm_away';
+          this._pin        = '';
+          this.render();
+        } else {
+          this._apiCall('/api/arm_away', {}).catch(e => _hs.error('arm_away failed:', e));
+          this._showInterface = false;
+          setTimeout(() => this.render(), 300);
+        }
+      });
+    });
+
+    // Step 8: confirm-arm — send PIN to arm endpoint
+    this.shadowRoot.querySelectorAll('[data-action="confirm-arm"]').forEach(el => {
+      el.addEventListener('click', () => {
+        if (this._pin.length >= 6) {
+          const pin    = this._pin;
+          const action = this._armAction || 'arm_home';
+          this._pin        = '';
+          this._showArmPin = false;
+          this._armAction  = null;
+          this._showInterface = false;
+          this._apiCall(`/api/${action}`, { pin })
+            .catch(e => _hs.error('arm with PIN failed:', e));
+          setTimeout(() => this.render(), 300);
+        }
       });
     });
 
