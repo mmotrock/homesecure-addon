@@ -64,6 +64,10 @@ class HomeSecureCard extends HTMLElement {
     this._armAction  = null;
     this._serverConfig = {};
     this._configLoaded = false;
+    this._prevEntityState = null;  // track state changes for audio
+    this._beepInterval    = null;  // repeating beep timer
+    this._audioDevices    = [];    // cached from server config
+    this._audioVolume     = 0.8;   // 0-1
     this._apiUrl = _detectApiUrl(null);
     this._apiToken = '';
   }
@@ -102,6 +106,13 @@ class HomeSecureCard extends HTMLElement {
     if (!oldHass && this._apiUrl) this._loadServerConfig();
 
     if (this.entity) {
+      // Detect state changes for audio alerts
+      const newState  = this.entity.state;
+      const prevState = this._prevEntityState;
+      if (newState !== prevState) {
+        this._handleStateChange(prevState, newState);
+        this._prevEntityState = newState;
+      }
       if (!this._showAdmin) {
         this.render();
       }
@@ -118,6 +129,11 @@ class HomeSecureCard extends HTMLElement {
         const json = await resp.json();
         this._serverConfig = json.config || json || {};
         _hs.log('Server config loaded:', this._serverConfig);
+        // Cache audio settings
+        const devices = this._serverConfig.audio_devices || '';
+        this._audioDevices = devices ? devices.split(',').filter(Boolean) : [];
+        const vol = parseInt(this._serverConfig.audio_volume || 80);
+        this._audioVolume = Math.min(100, Math.max(0, vol)) / 100;
       }
     } catch (e) {
       _hs.warn('Could not load server config:', e);
@@ -695,6 +711,73 @@ class HomeSecureCard extends HTMLElement {
     `;
   }
 
+  // ── Audio alert methods ──────────────────────────────────────────────────
+
+  _playTone(mediaFile) {
+    if (!this._audioDevices.length || !this._hass) return;
+    const url = `${window.location.origin}/local/community/homesecure/${mediaFile}`;
+    for (const entityId of this._audioDevices) {
+      this._hass.callService('media_player', 'play_media', {
+        entity_id:  entityId,
+        media_content_id:   url,
+        media_content_type: 'music',
+      }).catch(e => _hs.warn('Audio play failed:', e));
+      // Set volume separately
+      this._hass.callService('media_player', 'volume_set', {
+        entity_id:    entityId,
+        volume_level: this._audioVolume,
+      }).catch(() => {});
+    }
+  }
+
+  _startBeepInterval(mediaFile, intervalMs) {
+    this._stopBeepInterval();
+    this._playTone(mediaFile); // play immediately
+    this._beepInterval = setInterval(() => this._playTone(mediaFile), intervalMs);
+  }
+
+  _stopBeepInterval() {
+    if (this._beepInterval) {
+      clearInterval(this._beepInterval);
+      this._beepInterval = null;
+    }
+  }
+
+  _handleStateChange(prevState, newState) {
+    if (prevState === newState) return;
+    _hs.log('Alarm state change:', prevState, '→', newState);
+
+    this._stopBeepInterval();
+
+    switch (newState) {
+      case 'arming':
+        // Short beep every 2 seconds during exit delay
+        this._startBeepInterval('beep_short.mp3', 2000);
+        break;
+      case 'armed_away':
+        // One long beep when fully armed
+        this._playTone('beep_long.mp3');
+        break;
+      case 'armed_home':
+        // One long beep immediately on arm home
+        this._playTone('beep_long.mp3');
+        break;
+      case 'pending':
+        // Longer entry beep every 2 seconds during entry delay
+        this._startBeepInterval('beep_entry.mp3', 2000);
+        break;
+      case 'disarmed':
+        // Short confirmation beep on disarm (only if was armed/pending, not on initial load)
+        if (prevState && ['armed_away', 'armed_home', 'pending', 'arming'].includes(prevState)) {
+          this._playTone('beep_short.mp3');
+        }
+        break;
+      case 'triggered':
+        // Stop beeping — siren handles this
+        break;
+    }
+  }
+
   renderArmPin() {
     const label   = this._armAction === 'arm_away' ? 'Arm Away' : 'Arm Home';
     const pinDots = '●'.repeat(this._pin.length) || '●●●●●●';
@@ -1084,6 +1167,10 @@ class HomeSecureCard extends HTMLElement {
   callService(domain, service, data) {
     // Used only for native HA entity toggles (lock/cover entry points)
     this._hass.callService(domain, service, data);
+  }
+
+  disconnectedCallback() {
+    this._stopBeepInterval();
   }
 }
 

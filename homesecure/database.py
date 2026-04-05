@@ -40,6 +40,7 @@ VALID_CONFIG_KEYS = {
     "service_pin",
     # security / behaviour settings (new in v2.0)
     "max_failed_attempts", "lockout_duration",
+    "audio_devices", "audio_volume",
     "alarm_auto_action", "require_pin_to_arm",
     "log_retention_days",
 }

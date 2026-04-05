@@ -1722,15 +1722,121 @@ class HomeSecureAdmin extends HTMLElement {
   }
 
   renderDevicesTab() {
+    if (!this._config && !this._configLoading) this.loadConfig();
+    if (this._configLoading) {
+      return `<div style="padding:40px;text-align:center;color:var(--secondary-text-color);">Loading…</div>`;
+    }
+
+    const c = this._config || {};
+    const savedDevices = c.audio_devices ? c.audio_devices.split(',').filter(Boolean) : [];
+    const volume       = c.audio_volume !== undefined ? parseInt(c.audio_volume) : 80;
+
+    // Get all media_player entities from hass
+    const mediaPlayers = this._hass
+      ? Object.entries(this._hass.states)
+          .filter(([eid]) => eid.startsWith('media_player.'))
+          .map(([eid, state]) => ({
+            entity_id:    eid,
+            friendly_name: state.attributes.friendly_name || eid,
+            state:         state.state,
+          }))
+          .sort((a, b) => a.friendly_name.localeCompare(b.friendly_name))
+      : [];
+
+    const deviceRows = mediaPlayers.length === 0
+      ? `<div style="padding:16px;color:var(--secondary-text-color);font-size:13px;">
+           No media_player entities found. Install the HA Companion app on your tablet
+           and ensure media_player entities are available.
+         </div>`
+      : mediaPlayers.map(mp => {
+          const checked = savedDevices.includes(mp.entity_id);
+          const stateColor = mp.state === 'playing' ? '#10b981' : 'var(--secondary-text-color)';
+          return `
+            <div style="display:flex;align-items:center;gap:12px;padding:12px 0;
+                        border-bottom:1px solid var(--divider-color);">
+              <input type="checkbox" id="mp-${mp.entity_id}"
+                     data-action="toggle-audio-device"
+                     data-entity="${mp.entity_id}"
+                     ${checked ? 'checked' : ''}
+                     style="width:18px;height:18px;cursor:pointer;flex-shrink:0;">
+              <label for="mp-${mp.entity_id}" style="flex:1;cursor:pointer;">
+                <div style="font-size:14px;font-weight:500;color:var(--primary-text-color);">
+                  ${mp.friendly_name}
+                </div>
+                <div style="font-size:11px;color:${stateColor};margin-top:2px;">
+                  ${mp.entity_id} · ${mp.state}
+                </div>
+              </label>
+            </div>`;
+        }).join('');
+
     return `
-      <div class="empty-state">
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
-        </svg>
-        <div class="empty-state-title">Devices Coming Soon</div>
-        <div class="empty-state-text">Device management will be available in a future update</div>
-      </div>
-    `;
+      <div style="max-width:800px;margin:0 auto;">
+        <h3 style="margin-bottom:8px;color:var(--primary-text-color);">Devices</h3>
+        <p style="margin-top:0;margin-bottom:28px;font-size:14px;color:var(--secondary-text-color);">
+          Select media players to use for alarm audio alerts.
+        </p>
+
+        <!-- ── Audio Alert Devices ──────────────────────────────────── -->
+        <div style="background:var(--card-background-color);border:1px solid var(--divider-color);
+                    border-radius:14px;padding:24px;margin-bottom:20px;">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+            <span style="font-size:22px;">🔊</span>
+            <div>
+              <div style="font-size:16px;font-weight:600;color:var(--primary-text-color);">
+                Audio Alert Devices
+              </div>
+              <div style="font-size:13px;color:var(--secondary-text-color);">
+                Selected devices will beep during arming, entry delay, and on disarm
+              </div>
+            </div>
+          </div>
+
+          <div style="margin:16px 0;">
+            ${deviceRows}
+          </div>
+
+          <!-- Volume -->
+          <div style="margin-top:20px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+              <label style="font-size:14px;font-weight:500;color:var(--primary-text-color);">
+                Alert volume
+              </label>
+              <span id="volume-display" style="font-size:14px;color:var(--secondary-text-color);">
+                ${volume}%
+              </span>
+            </div>
+            <input type="range" id="audio-volume" data-action="set-audio-volume"
+                   min="10" max="100" step="5" value="${volume}"
+                   style="width:100%;accent-color:var(--primary-color);">
+          </div>
+
+          <button data-action="save-audio-devices"
+                  style="margin-top:20px;padding:10px 20px;background:var(--primary-color);
+                         color:white;border:none;border-radius:8px;cursor:pointer;
+                         font-size:14px;font-weight:500;">
+            Save Audio Settings
+          </button>
+        </div>
+
+        <!-- ── Alert Behavior ───────────────────────────────────────── -->
+        <div style="background:var(--card-background-color);border:1px solid var(--divider-color);
+                    border-radius:14px;padding:24px;margin-bottom:20px;">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+            <span style="font-size:22px;">📋</span>
+            <div style="font-size:16px;font-weight:600;color:var(--primary-text-color);">
+              Alert Behavior
+            </div>
+          </div>
+          <div style="font-size:13px;color:var(--secondary-text-color);line-height:1.8;">
+            <div>🔔 <strong>Arming Away</strong> — short beep every 2 seconds during exit delay,
+                 one long beep when armed</div>
+            <div>🏠 <strong>Arm Home</strong> — one long beep immediately</div>
+            <div>⚠️ <strong>Entry delay</strong> — longer beep every 2 seconds until disarmed</div>
+            <div>✅ <strong>Disarm</strong> — one short confirmation beep</div>
+          </div>
+        </div>
+      </div>`;
   }
 
   renderSecurityTab() {
@@ -2537,6 +2643,38 @@ class HomeSecureAdmin extends HTMLElement {
         } catch (e) {
           _hs.error('Failed to sync to new locks:', e);
           this.showNotification('Failed to sync to new locks', 'error');
+        }
+      });
+    });
+
+    // ── Audio device settings ───────────────────────────────────────────────
+    // Volume slider live display
+    const volSlider = this.shadowRoot.querySelector('[data-action="set-audio-volume"]');
+    const volDisplay = this.shadowRoot.getElementById('volume-display');
+    if (volSlider && volDisplay) {
+      volSlider.addEventListener('input', () => {
+        volDisplay.textContent = volSlider.value + '%';
+      });
+    }
+
+    // Save audio settings
+    this.shadowRoot.querySelectorAll('[data-action="save-audio-devices"]').forEach(el => {
+      el.addEventListener('click', async () => {
+        const checked = Array.from(
+          this.shadowRoot.querySelectorAll('[data-action="toggle-audio-device"]:checked')
+        ).map(cb => cb.dataset.entity);
+        const vol = this.shadowRoot.querySelector('[data-action="set-audio-volume"]')?.value || 80;
+        try {
+          await this._apiPost('/api/config', {
+            admin_pin:     this._adminPin,
+            audio_devices: checked.join(','),
+            audio_volume:  parseInt(vol),
+          });
+          this._config = { ...this._config, audio_devices: checked.join(','), audio_volume: parseInt(vol) };
+          this.showNotification('Audio settings saved', 'success');
+        } catch (e) {
+          _hs.error('Failed to save audio settings:', e);
+          this.showNotification('Failed to save audio settings', 'error');
         }
       });
     });
