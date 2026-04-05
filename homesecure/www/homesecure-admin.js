@@ -80,6 +80,7 @@ class HomeSecureAdmin extends HTMLElement {
       days: 7
     };
     this._eventsLoaded = false;
+    this._expandedEvents = new Set();
     this._pendingRequirePin = undefined;  // tracks unsaved toggle state on Security tab
     this._bootstrapChecked = false; // prevent repeated checks
     // Load lockout state from localStorage
@@ -1563,71 +1564,108 @@ class HomeSecureAdmin extends HTMLElement {
   }
 
   renderEventItem(event) {
-    const timestamp = new Date(event.timestamp);
-    const timeAgo = this.getTimeAgo(timestamp);
-    const details = event.details || {};
-    
+    const timestamp  = new Date(event.timestamp);
+    const timeAgo    = this.getTimeAgo(timestamp);
+
+    // details may be a JSON string or already an object
+    let details = {};
+    if (event.details) {
+      if (typeof event.details === 'string') {
+        try { details = JSON.parse(event.details); } catch { details = {}; }
+      } else {
+        details = event.details;
+      }
+    }
+
+    const eventId    = String(event.id || `${event.event_type}-${event.timestamp}`);
+    const isExpanded = this._expandedEvents.has(eventId);
+
     const eventConfig = {
-      'door_locked': { icon: '🔒', color: '#10b981', label: 'Door Locked' },
-      'door_unlocked': { icon: '🔓', color: '#f59e0b', label: 'Door Unlocked' },
-      'garage_opened': { icon: '⬆️', color: '#ef4444', label: 'Garage Opened' },
-      'garage_closed': { icon: '⬇️', color: '#10b981', label: 'Garage Closed' },
-      'garage_opening': { icon: '↗️', color: '#f59e0b', label: 'Garage Opening' },
-      'garage_closing': { icon: '↘️', color: '#f59e0b', label: 'Garage Closing' },
-      'alarm_armed': { icon: '🛡️', color: '#3b82f6', label: 'Alarm Armed' },
-      'alarm_disarmed': { icon: '✅', color: '#10b981', label: 'Alarm Disarmed' },
+      'door_locked':     { icon: '🔒', color: '#10b981', label: 'Door Locked' },
+      'door_unlocked':   { icon: '🔓', color: '#f59e0b', label: 'Door Unlocked' },
+      'garage_opened':   { icon: '⬆️', color: '#ef4444', label: 'Garage Opened' },
+      'garage_closed':   { icon: '⬇️', color: '#10b981', label: 'Garage Closed' },
+      'garage_opening':  { icon: '↗️', color: '#f59e0b', label: 'Garage Opening' },
+      'garage_closing':  { icon: '↘️', color: '#f59e0b', label: 'Garage Closing' },
+      'alarm_armed':     { icon: '🛡️', color: '#3b82f6', label: 'Alarm Armed' },
+      'alarm_disarmed':  { icon: '✅', color: '#10b981', label: 'Alarm Disarmed' },
       'alarm_triggered': { icon: '🚨', color: '#ef4444', label: 'Alarm Triggered' },
-      'state_change': { icon: '🔄', color: '#6b7280', label: 'State Change' },
-      'user_added': { icon: '➕', color: '#10b981', label: 'User Added' },
-      'user_deleted': { icon: '➖', color: '#ef4444', label: 'User Deleted' },
+      'state_change':    { icon: '🔄', color: '#6b7280', label: 'State Change' },
+      'user_added':      { icon: '➕', color: '#10b981', label: 'User Added' },
+      'user_updated':    { icon: '✏️', color: '#6b7280', label: 'User Updated' },
+      'user_deleted':    { icon: '➖', color: '#ef4444', label: 'User Deleted' },
+      'config_updated':  { icon: '⚙️', color: '#8b5cf6', label: 'Config Updated' },
+      'lock_synced':     { icon: '🔑', color: '#10b981', label: 'Lock Synced' },
     };
-    
-    const config = eventConfig[event.event_type] || { 
-      icon: '📋', 
-      color: '#6b7280', 
-      label: this.formatEventType(event.event_type) 
-    };
-    
-    const entityName = details.entity_name || event.zone_entity_id || 'Unknown';
+
+    const cfg      = eventConfig[event.event_type] || { icon: '📋', color: '#6b7280', label: this.formatEventType(event.event_type) };
     const userName = event.user_name || 'System';
-    
+    const entity   = details.entity_name || event.zone_entity_id || '';
+
+    // Build the expanded detail rows
+    const knownKeys = new Set(['entity_name', 'previous_state', 'new_state', 'mode', 'zone', 'ip_address']);
+    const detailRows = [];
+    if (event.user_name)         detailRows.push(['By',             event.user_name]);
+    if (timestamp)               detailRows.push(['Time',           timestamp.toLocaleString()]);
+    if (entity)                  detailRows.push(['Entity',         entity]);
+    if (details.previous_state)  detailRows.push(['Previous state', details.previous_state]);
+    if (details.new_state)       detailRows.push(['New state',      details.new_state]);
+    if (details.mode)            detailRows.push(['Mode',           details.mode]);
+    if (details.zone)            detailRows.push(['Zone',           details.zone]);
+    if (details.ip_address)      detailRows.push(['IP address',     details.ip_address]);
+    // Any remaining keys not already shown
+    Object.entries(details).forEach(([k, v]) => {
+      if (!knownKeys.has(k) && v !== null && v !== undefined && v !== '')
+        detailRows.push([k.replace(/_/g, ' '), String(v)]);
+    });
+
+    const expandedHtml = isExpanded && detailRows.length > 0 ? `
+      <div style="margin-top:10px; padding:10px 12px;
+                  background:var(--secondary-background-color);
+                  border-radius:8px; font-size:12px;">
+        ${detailRows.map(([label, val]) => `
+          <div style="display:flex; gap:12px; padding:4px 0;
+                      border-bottom:1px solid var(--divider-color);">
+            <span style="color:var(--secondary-text-color); min-width:110px;
+                         flex-shrink:0; text-transform:capitalize;">${label}</span>
+            <span style="color:var(--primary-text-color); word-break:break-all;">${val}</span>
+          </div>`).join('')}
+      </div>` : '';
+
     return `
-      <div style="display: flex; gap: 16px; padding: 16px; border-bottom: 1px solid var(--divider-color); align-items: flex-start;">
-        <div style="font-size: 32px; flex-shrink: 0;">${config.icon}</div>
-        
-        <div style="flex: 1;">
-          <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 4px;">
-            <div style="font-size: 15px; font-weight: 600; color: var(--primary-text-color);">
-              ${config.label}
+      <div style="border-bottom:1px solid var(--divider-color);">
+        <div data-action="toggle-event" data-event-id="${eventId}"
+             style="display:flex; gap:14px; padding:14px 16px; align-items:flex-start;
+                    cursor:pointer; user-select:none;">
+          <div style="font-size:26px; flex-shrink:0; margin-top:2px;">${cfg.icon}</div>
+          <div style="flex:1; min-width:0;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <div style="font-size:14px; font-weight:600; color:var(--primary-text-color);">
+                ${cfg.label}
+                ${event.user_name
+                  ? `<span style="font-weight:400; color:${cfg.color};"> · ${userName}</span>`
+                  : ''}
+              </div>
+              <div style="display:flex; align-items:center; gap:8px; flex-shrink:0; margin-left:8px;">
+                <span style="font-size:11px; color:var(--disabled-text-color);">${timeAgo}</span>
+                <span style="font-size:11px; color:var(--secondary-text-color);">${isExpanded ? '▲' : '▼'}</span>
+              </div>
             </div>
-            <div style="font-size: 12px; color: var(--disabled-text-color);">
-              ${timeAgo}
-            </div>
-          </div>
-          
-          <div style="font-size: 13px; color: var(--secondary-text-color); margin-bottom: 8px;">
-            ${entityName}
-            ${event.user_name ? `<span style="color: ${config.color}; font-weight: 500;"> • ${userName}</span>` : ''}
-          </div>
-          
-          ${details.previous_state && details.new_state ? `
-            <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--disabled-text-color);">
-              <span style="background: var(--secondary-background-color); padding: 4px 8px; border-radius: 4px;">
-                ${details.previous_state}
-              </span>
-              <span>→</span>
-              <span style="background: ${config.color}20; color: ${config.color}; padding: 4px 8px; border-radius: 4px; font-weight: 500;">
-                ${details.new_state}
-              </span>
-            </div>
-          ` : ''}
-          
-          <div style="font-size: 11px; color: var(--disabled-text-color); margin-top: 4px;">
-            ${timestamp.toLocaleString()}
+            ${entity
+              ? `<div style="font-size:12px; color:var(--secondary-text-color); margin-top:2px;">${entity}</div>`
+              : ''}
+            ${details.previous_state && details.new_state ? `
+              <div style="display:flex; align-items:center; gap:6px; font-size:11px; margin-top:4px;">
+                <span style="background:var(--secondary-background-color);
+                             padding:2px 6px; border-radius:4px;">${details.previous_state}</span>
+                <span style="color:var(--secondary-text-color);">→</span>
+                <span style="background:${cfg.color}20; color:${cfg.color};
+                             padding:2px 6px; border-radius:4px; font-weight:500;">${details.new_state}</span>
+              </div>` : ''}
+            ${expandedHtml}
           </div>
         </div>
-      </div>
-    `;
+      </div>`;
   }
 
   formatEventType(type) {
@@ -2511,6 +2549,19 @@ class HomeSecureAdmin extends HTMLElement {
       });
     });
 
+    // Toggle event row expand/collapse
+    this.shadowRoot.querySelectorAll('[data-action="toggle-event"]').forEach(el => {
+      el.addEventListener('click', () => {
+        const eventId = el.dataset.eventId;
+        if (this._expandedEvents.has(eventId)) {
+          this._expandedEvents.delete(eventId);
+        } else {
+          this._expandedEvents.add(eventId);
+        }
+        this.render();
+      });
+    });
+
     // Toggle lock access (updated for instant DB update)
     this.shadowRoot.querySelectorAll('[data-action="toggle-lock-access"]').forEach(el => {
       el.addEventListener('click', async (e) => {
@@ -2633,6 +2684,7 @@ class HomeSecureAdmin extends HTMLElement {
         this._eventFilters.days = parseInt(daysSelect.value);
         
         this._eventsLoaded = false;
+    this._expandedEvents = new Set();
         this.render();
       });
     });
@@ -2640,6 +2692,7 @@ class HomeSecureAdmin extends HTMLElement {
     this.shadowRoot.querySelectorAll('[data-action="refresh-events"]').forEach(el => {
       el.addEventListener('click', () => {
         this._eventsLoaded = false;
+    this._expandedEvents = new Set();
         this.render();
       });
     });
