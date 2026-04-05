@@ -5,9 +5,14 @@
 ZWAVE_URL=$(bashio::config 'zwave_server_url')
 LOG_LEVEL=$(bashio::config 'log_level')
 API_TOKEN=$(bashio::config 'api_token' 2>/dev/null || echo "")
+# debug_logging: true overrides log_level to debug regardless of dropdown
+DEBUG_LOGGING=$(bashio::config 'debug_logging' 2>/dev/null || echo "false")
+if [ "${DEBUG_LOGGING}" = "true" ]; then
+  LOG_LEVEL="debug"
+fi
 
 bashio::log.info "======================================================="
-bashio::log.info " HomeSecure Container  v2.0.0"
+bashio::log.info " HomeSecure Container  v2.0.1"
 bashio::log.info "======================================================="
 bashio::log.info " Z-Wave JS : ${ZWAVE_URL}"
 bashio::log.info " Log level : ${LOG_LEVEL}"
@@ -43,7 +48,7 @@ if [ -z "${INSTALLED_VERSION}" ]; then
     bashio::log.warning "║                                                      ║"
     bashio::log.warning "║  Settings → Devices & Services → Add Integration    ║"
     bashio::log.warning "║  Search: HomeSecure                                  ║"
-    bashio::log.warning "║  URL:    http://localhost:8099                        ║"
+    bashio::log.warning "║  URL:    http://c2e9a60a-homesecure:8099              ║"
     bashio::log.warning "║                                                      ║"
     bashio::log.warning "╚══════════════════════════════════════════════════════╝"
     bashio::log.warning ""

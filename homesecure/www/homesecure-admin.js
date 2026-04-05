@@ -945,28 +945,20 @@ class HomeSecureAdmin extends HTMLElement {
   }
 
   renderBody() {
-    if (this._currentView === 'user-list') {
+    // User sub-views only apply when the users tab is active
+    if (this._currentTab === 'users') {
+      if (this._currentView === 'user-detail') return this.renderUserDetail();
+      if (this._currentView === 'user-add')    return this.renderUserAdd();
       return this.renderUserList();
-    } else if (this._currentView === 'user-detail') {
-      return this.renderUserDetail();
-    } else if (this._currentView === 'user-add') {
-      return this.renderUserAdd();
     }
 
-    // Default main view based on tab
+    // All other tabs render directly
     switch (this._currentTab) {
-      case 'users':
-        return this.renderUserList();
-      case 'events':
-        return this.renderEventsTab();
-      case 'devices':
-        return this.renderDevicesTab();
-      case 'security':
-        return this.renderSecurityTab();
-      case 'general':
-        return this.renderGeneralTab();
-      default:
-        return this.renderUserList();
+      case 'events':   return this.renderEventsTab();
+      case 'devices':  return this.renderDevicesTab();
+      case 'security': return this.renderSecurityTab();
+      case 'general':  return this.renderGeneralTab();
+      default:         return this.renderUserList();
     }
   }
 

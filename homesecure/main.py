@@ -15,12 +15,15 @@ from lock_manager import LockManager
 from api_server import APIServer
 from migrate import should_migrate, run_migration
 
+_log_level_str = os.environ.get("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
-    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+    level=getattr(logging, _log_level_str, logging.INFO),
     format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 _LOGGER = logging.getLogger("homesecure.main")
+if _log_level_str == "DEBUG":
+    _LOGGER.debug("=== DEBUG LOGGING ENABLED ===")
 
 
 def _get_or_create_service_pin(db: AlarmDatabase) -> str:
