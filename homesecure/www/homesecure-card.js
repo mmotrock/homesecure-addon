@@ -1511,10 +1511,13 @@ class HomeSecureCardEditor extends HTMLElement {
     const addBtn = this.shadowRoot.getElementById('add-entry');
     if (addBtn) {
       addBtn.addEventListener('click', () => {
-        this._config.entry_points = [
-          ...this._config.entry_points,
-          { name: '', entity_id: '', type: 'door', garage_type: 'toggle', battery_entity: '' }
-        ];
+        this._config = {
+          ...this._config,
+          entry_points: [
+            ...this._config.entry_points,
+            { name: '', entity_id: '', type: 'door', garage_type: 'toggle', battery_entity: '' }
+          ]
+        };
         this.configChanged();
         this.render();
       });
@@ -1524,28 +1527,33 @@ class HomeSecureCardEditor extends HTMLElement {
     this.shadowRoot.querySelectorAll('[data-action="remove"]').forEach(btn => {
       btn.addEventListener('click', (e) => {
         const index = parseInt(e.target.dataset.index);
-        this._config.entry_points = this._config.entry_points.filter((_, i) => i !== index);
+        this._config = {
+          ...this._config,
+          entry_points: this._config.entry_points.filter((_, i) => i !== index)
+        };
         this.configChanged();
         this.render();
       });
     });
 
-    // Entry point field changes
+    // Entry point field changes — must create new object references for HA to detect changes
     this.shadowRoot.querySelectorAll('[data-field]').forEach(input => {
       input.addEventListener('change', (e) => {
         const index = parseInt(e.target.dataset.index);
         const field = e.target.dataset.field;
-        this._config.entry_points[index][field] = e.target.value;
-        
-        // If type changes to/from garage, re-render to show/hide garage_type field
-        if (field === 'type') {
-          // Initialize garage_type if switching to garage
-          if (e.target.value === 'garage' && !this._config.entry_points[index].garage_type) {
-            this._config.entry_points[index].garage_type = 'toggle';
-          }
-          this.render();
+        const updatedPoint = { ...this._config.entry_points[index], [field]: e.target.value };
+
+        // Initialize garage_type when switching to garage
+        if (field === 'type' && e.target.value === 'garage' && !updatedPoint.garage_type) {
+          updatedPoint.garage_type = 'toggle';
         }
-        
+
+        this._config = {
+          ...this._config,
+          entry_points: this._config.entry_points.map((ep, i) => i === index ? updatedPoint : ep)
+        };
+
+        if (field === 'type') this.render();
         this.configChanged();
       });
     });
