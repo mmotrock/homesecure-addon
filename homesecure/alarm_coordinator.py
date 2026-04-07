@@ -6,6 +6,7 @@ Notifies subscribers via asyncio.Queue (consumed by the WS broadcaster).
 """
 import asyncio
 import hmac
+import json
 import logging
 from datetime import datetime
 from typing import Any, Callable, Dict, Optional, Set
@@ -219,6 +220,7 @@ class AlarmCoordinator:
         )
 
         _LOGGER.info("Arming away in %ds (initiated by %s)", exit_delay, changed_by)
+        asyncio.create_task(self._schedule_arm_actions("arm_away_actions"))
         return {"success": True, "message": f"Arming away in {exit_delay}s", "delay": exit_delay}
 
     async def arm_home(self, pin: str) -> Dict[str, Any]:
@@ -243,7 +245,41 @@ class AlarmCoordinator:
         self._cancel_timers()
         changed_by = user["name"]
         await self._set_state(STATE_ARMED_HOME, changed_by)
+        asyncio.create_task(self._schedule_arm_actions("arm_home_actions"))
         return {"success": True, "message": "Armed home"}
+
+    async def _schedule_arm_actions(self, config_key: str) -> None:
+        """Execute configured arm actions (lock doors, close garages) with per-entity delays."""
+        from api_server import call_ha_service
+        cfg     = self.database.get_config()
+        raw     = cfg.get(config_key, "")
+        if not raw:
+            return
+        try:
+            actions = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            _LOGGER.error("Invalid arm actions config for %s", config_key)
+            return
+
+        for action in actions:
+            entity_id = action.get("entity_id", "")
+            service   = action.get("action", "")
+            delay     = int(action.get("delay", 0))
+            if not entity_id or not service or service == "none":
+                continue
+            # Determine HA domain and service from action string
+            if service == "lock":
+                domain, svc = "lock", "lock"
+            elif service == "close":
+                domain, svc = "cover", "close_cover"
+            else:
+                _LOGGER.warning("Unknown arm action '%s' for %s", service, entity_id)
+                continue
+
+            if delay > 0:
+                await asyncio.sleep(delay)
+            _LOGGER.info("Arm action: %s.%s -> %s (delay=%ds)", domain, svc, entity_id, delay)
+            await call_ha_service(domain, svc, entity_id)
 
     async def disarm(self, pin: str) -> Dict[str, Any]:
         user = self._authenticate(pin)

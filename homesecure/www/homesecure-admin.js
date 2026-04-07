@@ -1971,6 +1971,80 @@ class HomeSecureAdmin extends HTMLElement {
           </div>
         </div>
 
+        <!-- ── Arm Actions ─────────────────────────────────────────────────── -->
+        <div style="background: var(--card-background-color); border: 1px solid var(--divider-color); border-radius: 14px; padding: 24px; margin-bottom: 28px;">
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
+            <span style="font-size: 22px;">⚡</span>
+            <div>
+              <div style="font-size: 16px; font-weight: 600; color: var(--primary-text-color);">Arm Actions</div>
+              <div style="font-size: 13px; color: var(--secondary-text-color);">
+                Automatically lock doors or close garage doors when arming. Delays are in seconds from when the arm command is received.
+              </div>
+            </div>
+          </div>
+
+          ${['arm_home', 'arm_away'].map(mode => {
+            const label    = mode === 'arm_home' ? 'Arm Home' : 'Arm Away';
+            const icon     = mode === 'arm_home' ? '🏠' : '🚗';
+            const key      = mode + '_actions';
+            let actions    = [];
+            try { actions = JSON.parse(c[key] || '[]'); } catch(e) { actions = []; }
+
+            const locks  = this._hass ? Object.keys(this._hass.states).filter(e => e.startsWith('lock.'))  : [];
+            const covers = this._hass ? Object.keys(this._hass.states).filter(e => e.startsWith('cover.')) : [];
+            const allActionEntities = [...locks, ...covers].sort();
+
+            const rows = actions.length === 0
+              ? `<div style="font-size: 13px; color: var(--secondary-text-color); padding: 8px 0;">No actions configured.</div>`
+              : actions.map((a, idx) => `
+                  <div style="display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--divider-color); flex-wrap: wrap;">
+                    <select data-arm-mode="${mode}" data-arm-idx="${idx}" data-arm-field="entity_id"
+                            style="flex: 2; min-width: 160px; padding: 6px 8px; border-radius: 6px;
+                                   border: 1px solid var(--divider-color); background: var(--secondary-background-color);
+                                   color: var(--primary-text-color); font-size: 13px;">
+                      <option value="">Select entity…</option>
+                      ${allActionEntities.map(e => `<option value="${e}" ${a.entity_id === e ? 'selected' : ''}>${e}</option>`).join('')}
+                    </select>
+                    <select data-arm-mode="${mode}" data-arm-idx="${idx}" data-arm-field="action"
+                            style="flex: 1; min-width: 100px; padding: 6px 8px; border-radius: 6px;
+                                   border: 1px solid var(--divider-color); background: var(--secondary-background-color);
+                                   color: var(--primary-text-color); font-size: 13px;">
+                      <option value="none" ${a.action === 'none' ? 'selected' : ''}>No action</option>
+                      <option value="lock"  ${a.action === 'lock'  ? 'selected' : ''}>Lock</option>
+                      <option value="close" ${a.action === 'close' ? 'selected' : ''}>Close</option>
+                    </select>
+                    <div style="display: flex; align-items: center; gap: 4px;">
+                      <input type="number" min="0" max="3600"
+                             data-arm-mode="${mode}" data-arm-idx="${idx}" data-arm-field="delay"
+                             value="${a.delay || 0}"
+                             style="width: 70px; padding: 6px 8px; border-radius: 6px;
+                                    border: 1px solid var(--divider-color); background: var(--secondary-background-color);
+                                    color: var(--primary-text-color); font-size: 13px; text-align: right;">
+                      <span style="font-size: 12px; color: var(--secondary-text-color);">sec</span>
+                    </div>
+                    <button data-arm-mode="${mode}" data-arm-idx="${idx}" data-action="remove-arm-action"
+                            style="padding: 4px 10px; border-radius: 6px; border: 1px solid var(--error-color);
+                                   background: transparent; color: var(--error-color); cursor: pointer; font-size: 12px;">
+                      ✕
+                    </button>
+                  </div>`).join('');
+
+            return `
+              <div style="margin-top: 20px;">
+                <div style="font-size: 14px; font-weight: 600; color: var(--primary-text-color); margin-bottom: 10px;">
+                  ${icon} ${label}
+                </div>
+                ${rows}
+                <button data-action="add-arm-action" data-arm-mode="${mode}"
+                        style="margin-top: 10px; padding: 6px 14px; border-radius: 6px;
+                               border: 1px solid var(--primary-color); background: transparent;
+                               color: var(--primary-color); cursor: pointer; font-size: 13px;">
+                  + Add action
+                </button>
+              </div>`;
+          }).join('')}
+        </div>
+
         <div style="display: flex; justify-content: flex-end;">
           <button class="btn btn-primary" data-action="save-security-settings"
                   style="min-width: 160px; padding: 14px 24px;">
@@ -2405,6 +2479,62 @@ class HomeSecureAdmin extends HTMLElement {
     });
 
     // ── Save security settings ───────────────────────────────────────────
+    // ── Arm action listeners ─────────────────────────────────────────────────
+
+    // Helper to read current arm actions state from DOM into array
+    const readArmActions = (mode) => {
+      const rows = this.shadowRoot.querySelectorAll(`[data-arm-mode="${mode}"][data-arm-field="entity_id"]`);
+      const actions = [];
+      rows.forEach((entitySel, idx) => {
+        const actionSel = this.shadowRoot.querySelector(
+          `[data-arm-mode="${mode}"][data-arm-idx="${idx}"][data-arm-field="action"]`);
+        const delayInp = this.shadowRoot.querySelector(
+          `[data-arm-mode="${mode}"][data-arm-idx="${idx}"][data-arm-field="delay"]`);
+        actions.push({
+          entity_id: entitySel.value,
+          action:    actionSel ? actionSel.value : 'none',
+          delay:     parseInt(delayInp ? delayInp.value : 0) || 0,
+        });
+      });
+      return actions;
+    };
+
+    // Add action row
+    this.shadowRoot.querySelectorAll('[data-action="add-arm-action"]').forEach(el => {
+      el.addEventListener('click', () => {
+        const mode = el.dataset.armMode;
+        let actions = [];
+        try { actions = JSON.parse(this._config?.[mode + '_actions'] || '[]'); } catch(e) { actions = []; }
+        actions.push({ entity_id: '', action: 'none', delay: 0 });
+        if (!this._config) this._config = {};
+        this._config[mode + '_actions'] = JSON.stringify(actions);
+        this.render();
+      });
+    });
+
+    // Remove action row
+    this.shadowRoot.querySelectorAll('[data-action="remove-arm-action"]').forEach(el => {
+      el.addEventListener('click', () => {
+        const mode = el.dataset.armMode;
+        const idx  = parseInt(el.dataset.armIdx);
+        let actions = [];
+        try { actions = JSON.parse(this._config?.[mode + '_actions'] || '[]'); } catch(e) { actions = []; }
+        actions.splice(idx, 1);
+        this._config[mode + '_actions'] = JSON.stringify(actions);
+        this.render();
+      });
+    });
+
+    // Field changes — update in-memory config immediately
+    this.shadowRoot.querySelectorAll('[data-arm-field]').forEach(el => {
+      el.addEventListener('change', () => {
+        const mode    = el.dataset.armMode;
+        const actions = readArmActions(mode);
+        if (!this._config) this._config = {};
+        this._config[mode + '_actions'] = JSON.stringify(actions);
+      });
+    });
+
     this.shadowRoot.querySelectorAll('[data-action="save-security-settings"]').forEach(el => {
       el.addEventListener('click', async () => {
         const maxAttempts  = parseInt(this.shadowRoot.getElementById('max-failed-attempts')?.value);
@@ -2421,6 +2551,10 @@ class HomeSecureAdmin extends HTMLElement {
         if (!['none', 'disarm', 'rearm'].includes(autoAction))
           return this.showNotification('Please select a post-alarm action', 'error');
 
+        // Read current arm actions from in-memory config (updated live by field change listeners)
+        const armHomeActions = this._config?.arm_home_actions || '[]';
+        const armAwayActions = this._config?.arm_away_actions || '[]';
+
         try {
           await this._apiPost('/api/config', {
             admin_pin:            this._adminPin,
@@ -2428,12 +2562,16 @@ class HomeSecureAdmin extends HTMLElement {
             lockout_duration:     lockoutMins * 60,
             alarm_auto_action:    autoAction,
             require_pin_to_arm:   requirePin ? 1 : 0,
+            arm_home_actions:     armHomeActions,
+            arm_away_actions:     armAwayActions,
           });
           if (this._config) {
             this._config.max_failed_attempts = maxAttempts;
             this._config.lockout_duration    = lockoutMins * 60;
             this._config.alarm_auto_action   = autoAction;
             this._config.require_pin_to_arm  = requirePin ? 1 : 0;
+            this._config.arm_home_actions    = armHomeActions;
+            this._config.arm_away_actions    = armAwayActions;
           }
           this._pendingRequirePin = undefined;
           this.showNotification('Security settings saved', 'success');

@@ -41,6 +41,7 @@ VALID_CONFIG_KEYS = {
     # security / behaviour settings (new in v2.0)
     "max_failed_attempts", "lockout_duration",
     "audio_devices", "audio_volume",
+    "arm_home_actions", "arm_away_actions",
     "alarm_auto_action", "require_pin_to_arm",
     "log_retention_days",
 }

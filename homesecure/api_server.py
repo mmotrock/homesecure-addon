@@ -87,6 +87,36 @@ def _auth_error() -> web.Response:
     return web.json_response({"error": "Unauthorized"}, status=401)
 
 
+async def call_ha_service(domain: str, service: str, entity_id: str) -> bool:
+    """Call a HA service via the supervisor REST API using the supervisor token."""
+    import os
+    token = os.environ.get("SUPERVISOR_TOKEN", "")
+    if not token:
+        _LOGGER.warning("No SUPERVISOR_TOKEN — cannot call HA service %s.%s", domain, service)
+        return False
+    url  = f"http://supervisor/core/api/services/{domain}/{service}"
+    data = {"entity_id": entity_id}
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                url,
+                json=data,
+                headers={"Authorization": f"Bearer {token}",
+                         "Content-Type": "application/json"},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status in (200, 201):
+                    _LOGGER.info("HA service called: %s.%s -> %s", domain, service, entity_id)
+                    return True
+                else:
+                    text = await resp.text()
+                    _LOGGER.error("HA service %s.%s failed (%d): %s", domain, service, resp.status, text)
+                    return False
+    except Exception as exc:
+        _LOGGER.error("HA service call error %s.%s %s: %s", domain, service, entity_id, exc)
+        return False
+
+
 class APIServer:
     """aiohttp-based REST + WebSocket server for the HomeSecure container."""
 

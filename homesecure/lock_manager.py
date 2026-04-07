@@ -196,7 +196,7 @@ class LockManager:
             entity_id = f"lock.node_{node_id}"
             self._managed_locks.append(entity_id)
             self._lock_nodes[entity_id] = node
-            desc = getattr(node.device_config, "description", f"Node {node_id}")
+            desc = getattr(node, "name", None) or getattr(node.device_config, "description", None) or f"Node {node_id}"
             _LOGGER.info("Discovered lock: %s (%s)", entity_id, desc)
 
         _LOGGER.info("Lock discovery complete — %d lock(s)", len(self._managed_locks))
@@ -634,7 +634,11 @@ class LockManager:
                 "entity_id": eid,
                 "node_id":   node.node_id if node else None,
                 "name": (
-                    getattr(node.device_config, "description", eid) if node else eid
+                    # Prefer the user-assigned name from Z-Wave JS UI (node.name),
+                    # fall back to product description, then entity_id
+                    (getattr(node, "name", None) or
+                     getattr(node.device_config, "description", None) or
+                     eid) if node else eid
                 ),
                 "occupied_slots": sorted(occupied_slots),
                 "total_slots": 30,

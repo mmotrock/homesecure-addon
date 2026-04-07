@@ -318,3 +318,113 @@ Failed attempts are intentionally not migrated. The service PIN is regenerated f
 
 > **Upgrade note:** Existing databases are automatically migrated — new columns are
 > added via `ALTER TABLE` on first startup. No manual SQL required.
+
+---
+
+## [2.0.1] - 2026-04-07
+
+### Added
+- **Arm Actions** — Security tab now has an "Arm Actions" section with separate
+  configuration for Arm Home and Arm Away. Each action specifies an entity
+  (`lock.*` or `cover.*`), an action (Lock / Close), and a delay in seconds
+  from when the arm command is received. Actions fire server-side via the HA
+  supervisor API so they work regardless of which source triggers the arm
+  (card, HA service, automation, voice).
+- **Audio alerts** via HA `media_player` entities — Devices tab in admin panel
+  allows selecting one or more media players for alarm tones. Three bundled
+  MP3 files copied to `/config/www/community/homesecure/` on startup:
+  `beep_short.mp3` (150ms, arm countdown + disarm confirm),
+  `beep_long.mp3` (600ms, armed confirmation),
+  `beep_entry.mp3` (400ms lower pitch, entry delay warning).
+  Badge card plays tones on state transitions: short beep every 2s during
+  arming, long beep on armed, entry beep every 2s during pending, short
+  confirm on disarm.
+- **Expandable event log rows** — clicking any event row in the Events tab
+  expands it to show full details: user, full timestamp, entity, previous
+  state, new state, mode, zone, IP address, and any other available fields.
+- **Debug logging in addon config tab** — `debug_logging: false` option added
+  to `config.yaml`. When enabled, overrides `log_level` and forces the Python
+  service to `DEBUG` level. Accessible even when the admin card won't load.
+- **`POST /api/locks/sync-user`** — sync one user to all locks with a provided
+  PIN; used by the re-enable PIN dialog.
+- **`POST /api/users/{id}/remove-from-locks`** — remove a user's codes from
+  all locks; called automatically when a user is disabled.
+- **`POST /api/locks/users/{id}/verify`** — targeted verify for one user
+  rather than a full sync of all users; used by the Verify Status button.
+- **`GET /api/locks/users/{id}`** — returns per-lock access state for one user.
+- **`POST /api/debug/clear-lockout`** — clears failed attempts without restart.
+
+### Fixed
+- **Arm without PIN no longer triggers failed attempt counter** — when
+  `require_pin_to_arm` is false and no PIN is provided, arming succeeds
+  without touching the failed-attempts counter. Previously every arm button
+  click counted as a failed auth attempt, causing phantom lockouts.
+- **UTC timezone mismatch** — all `datetime.now()` calls replaced with
+  `datetime.utcnow()` to match SQLite `CURRENT_TIMESTAMP` (UTC). Previously
+  the timezone offset caused failed attempts to appear recent long after they
+  had expired, causing lockouts to persist far longer than configured.
+- **`database.update_user()` now accepts `enabled` parameter** — was causing
+  a 500 error when toggling user enable/disable.
+- **Z-Wave lock discovery** — detects locks via value_id string parsing
+  (`nodeId-CC-endpoint-property-key`) since `node.command_classes` returns
+  empty in current zwave-js-server-python versions. 2-second delay added
+  after driver ready to allow node values to fully populate.
+- **`get_user_lock_status()` added to lock_manager** — was missing, causing
+  500 on all lock UI operations.
+- **`GET /api/users` returns `{"users": [...]}` format consistently.**
+- **Internal config changes** (service_pin) no longer logged as user-visible
+  config_updated events.
+- **CORS middleware** — fixes browser cards being blocked when calling the
+  container API across ports (HA on 8123, container on 8099).
+- **Admin card tab content** — correctly matches the active tab when
+  re-entering the admin panel. Previously `_currentView` state from the Users
+  tab leaked into other tabs, showing the user list regardless of which tab
+  was active.
+- **Admin card scroll position** saved and restored across renders.
+- **`updatePinDisplay()`** now enables the `confirm-arm` button as well as
+  the `disarm` button — previously the arm PIN keypad's enter button was
+  never enabled.
+- **Stale localStorage lockout state** cleared on card load and synced from
+  server.
+- **`loadUsers()` calls `render()`** after loading so the user list refreshes
+  immediately without requiring a separate interaction.
+- **User enable/disable toggle** now uses `PUT` (was incorrectly `POST`).
+- **Lock PIN cache** populated from locks on container startup so
+  enable/disable operations work after restart without re-entering PINs.
+- **Lock PIN persisted to DB** after sync so re-enable works after container
+  restart.
+- **Re-enable flow** — when re-enabling a user, if cached PIN is available the
+  lock access is restored automatically; otherwise a PIN keypad dialog prompts
+  the admin for the user's PIN.
+- **Entry point config editor** — field changes now create new object
+  references so HA detects and saves changes correctly (direct mutation was
+  silently ignored by HA's config-changed event handler).
+- **OptionsFlow 500** — `config_entry` removed from constructor call; HA sets
+  `self.config_entry` automatically in 2024.11+.
+- **Bootstrap flow** — `/api/bootstrap` endpoint allows first user creation
+  without PIN; config flow collects admin name and PIN during setup.
+- **`_get_usercode_value()` / `_get_userid_status_value()`** use value_id
+  string parsing for reliable operation across library versions.
+- **`sync_user_to_locks()` guard** for no managed locks prevents None slot
+  crash in log statement.
+
+### Changed
+- **Require PIN to arm** — badge card now shows a PIN keypad before sending
+  the arm command when `require_pin_to_arm` is enabled. Arm buttons show
+  "· PIN required" subtitle hint. Server config fetched once on card load.
+- **User disable** — now calls `POST /api/users/{id}/remove-from-locks`
+  automatically to clear lock codes when a user is disabled.
+- **Verify Status button** — now calls the targeted per-user verify endpoint
+  with 30s timeout instead of the full sync endpoint. Much faster.
+- **Sync to New button** — calls verify then reloads lock access state with
+  visual feedback on completion.
+- **Devices tab** — replaced "Coming Soon" placeholder with real media player
+  selection UI and volume control.
+- **`run.sh`** — reads `debug_logging` option and overrides `LOG_LEVEL` to
+  `debug` if set; copies audio MP3 files to Lovelace directory on startup.
+- **`config.yaml`** — `debug_logging: false` option added; port 8099 exposed
+  for direct LAN browser access.
+- **Debug console output** — `console.log` / `console.warn` removed from
+  normal card operation. All logging now goes through `_hs` shared logger
+  which is silent by default and verbose only when debug mode is enabled
+  (admin General tab toggle or `localStorage.setItem('homesecure_debug','1')`).
