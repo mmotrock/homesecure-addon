@@ -2,7 +2,7 @@
 
 A professional-grade security system for Home Assistant with alarm control, Z-Wave lock integration, multi-user management, and comprehensive event logging.
 
-![Version](https://img.shields.io/badge/version-2.0.1-blue)
+![Version](https://img.shields.io/badge/version-2.1.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.1+-orange)
 

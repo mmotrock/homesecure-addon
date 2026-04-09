@@ -1,5 +1,5 @@
 /**
- * HomeSecure Admin Panel v2.0
+ * HomeSecure Admin Panel v2.1
  * Admin interface — talks directly to the HomeSecure container REST API.
  * No longer uses HA services for user/lock/config operations.
  *
@@ -81,6 +81,8 @@ class HomeSecureAdmin extends HTMLElement {
     };
     this._eventsLoaded = false;
     this._expandedEvents = new Set();
+    this._managedEntities = [];
+    this._locks = [];
     this._pendingRequirePin = undefined;  // tracks unsaved toggle state on Security tab
     this._bootstrapChecked = false; // prevent repeated checks
     // Load lockout state from localStorage
@@ -1106,9 +1108,18 @@ class HomeSecureAdmin extends HTMLElement {
     const user = this._selectedUser;
     if (!user) return '';
 
-    // Load lock access from DB (instant, no Z-Wave JS query)
-    if (user.slot_number && !user._lockAccess && !user._lockAccessLoading) {
+    // Load lock access, entity access, and managed entities
+    if (!user._lockAccess && !user._lockAccessLoading) {
       this.loadUserLockAccess(user.id);
+    }
+    if (!user._entityAccess && !user._entityAccessLoading) {
+      this.loadUserEntityAccess(user.id);
+    }
+    if (this._managedEntities.length === 0) {
+      this.loadManagedEntities();
+    }
+    if (this._locks.length === 0) {
+      this.loadLocks();
     }
 
     return `
@@ -1211,14 +1222,14 @@ class HomeSecureAdmin extends HTMLElement {
 
           <div class="form-group">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-              <label class="form-label" style="margin: 0;">Per-Lock Access Control</label>
+              <label class="form-label" style="margin: 0;">Entity Access</label>
               <div style="display: flex; gap: 8px;">
-                <button class="btn btn-secondary" data-action="verify-locks" data-user-id="${user.id}" 
+                <button class="btn btn-secondary" data-action="verify-locks" data-user-id="${user.id}"
                         style="padding: 8px 16px; font-size: 13px;"
                         ${user._verifyingLocks ? 'disabled' : ''}>
                   ${user._verifyingLocks ? '⏳ Verifying...' : '🔍 Verify Status'}
                 </button>
-                <button class="btn btn-secondary" data-action="sync-to-new-locks" data-user-id="${user.id}" 
+                <button class="btn btn-secondary" data-action="sync-to-new-locks" data-user-id="${user.id}"
                         style="padding: 8px 16px; font-size: 13px;">
                   <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="display: inline; margin-right: 4px;">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
@@ -1233,9 +1244,10 @@ class HomeSecureAdmin extends HTMLElement {
               </div>
             ` : ''}
             <div style="font-size: 12px; color: var(--disabled-text-color); margin-bottom: 12px;">
-              ℹ️ Toggles show intended state from database. Click "Verify Status" to check actual lock state.
+              ℹ️ Lock toggles sync to Z-Wave. Cover toggles control badge card visibility.
+              Click "Verify Status" to check actual lock state.
             </div>
-            ${this.renderLockAccessList(user)}
+            ${this.renderEntityAccessList(user)}
           </div>
         ` : ''}
 
@@ -1248,596 +1260,86 @@ class HomeSecureAdmin extends HTMLElement {
     `;
   }
 
-  renderLockAccessList(user) {
-    // Get locks from container-cached list (populated by loadLocks())
-    // Falls back to reading lock.* from HA states if container list not yet loaded
-    const allLocks = (this._locks || []).length > 0
-      ? this._locks
-      : Object.keys(this._hass.states)
-          .filter(id => id.startsWith('lock.'))
-          .map(id => ({
-            entity_id: id,
-            name: this._hass.states[id].attributes.friendly_name || id,
-            state: this._hass.states[id].state
-          }));
-
-    if (allLocks.length === 0) {
-      return `<div style="color: var(--secondary-text-color); font-size: 13px; padding: 12px; background: var(--card-background-color); border-radius: 8px;">No locks found in your system.</div>`;
+  renderEntityAccessList(user) {
+    // Unified list: managed locks (Z-Wave) + managed covers (DB flag only)
+    const managed = this._managedEntities || [];
+    if (managed.length === 0) {
+      return `<div style="font-size:13px;color:var(--secondary-text-color);padding:12px;
+                          background:var(--card-background-color);border-radius:8px;">
+        No managed entities configured. Add locks and covers in General → Managed Entities.
+      </div>`;
     }
 
-    const lockAccess = user._lockAccess || {};
+    const lockAccess   = user._lockAccess   || {};
+    const entityAccess = user._entityAccess || {};
 
-    return allLocks.map(lock => {
-      const access = lockAccess[lock.entity_id] || {};
-      const isEnabled = access.enabled || false;
-      const isSyncing = user._lockSyncing && user._lockSyncing[lock.entity_id];
-      const lastSynced = access.last_synced;
-      const lastSuccess = access.last_sync_success !== false;
-      const syncError = access.last_sync_error;
-      
-      // Format timestamp
+    return managed.map(entity => {
+      const isLock    = entity.entity_type === 'lock';
+      const eid       = entity.entity_id;
+      const haState   = this._hass?.states[eid];
+      const stateStr  = haState?.state || 'unknown';
+
+      let isEnabled, isSyncing, lastSynced, lastSuccess, syncError;
+      if (isLock) {
+        const access  = lockAccess[eid] || {};
+        isEnabled     = access.enabled || false;
+        isSyncing     = user._lockSyncing && user._lockSyncing[eid];
+        lastSynced    = access.last_synced;
+        lastSuccess   = access.last_sync_success !== false;
+        syncError     = access.last_sync_error;
+      } else {
+        isEnabled  = entityAccess[eid] || false;
+        isSyncing  = false;
+        lastSynced = null;
+        lastSuccess = true;
+        syncError  = null;
+      }
+
       const syncTime = lastSynced ? this.getTimeAgo(new Date(lastSynced)) : 'Never';
-      
+      const icon     = isLock
+        ? (stateStr === 'locked' ? '🔒' : '🔓')
+        : (stateStr === 'open' ? '🚗' : '🏠');
+      const typeLabel = isLock ? 'Lock' : 'Cover';
+
       return `
-        <div class="lock-item" style="display: flex; flex-direction: column; gap: 8px; padding: 12px; background: var(--card-background-color); border-radius: 8px; margin-bottom: 8px; border: 1px solid var(--divider-color);">
-          <div style="display: flex; align-items: center; justify-content: space-between;">
-            <div style="display: flex; align-items: center; gap: 12px; flex: 1;">
-              <div style="font-size: 24px;">
-                ${lock.state === 'locked' ? '🔒' : '🔓'}
-              </div>
-              <div style="flex: 1;">
-                <div style="font-size: 14px; font-weight: 500; color: var(--primary-text-color);">
-                  ${lock.name}
-                  ${isSyncing ? ' <span style="font-size: 16px;">⏳</span>' : ''}
-                  ${!lastSuccess && lastSynced ? ' <span style="font-size: 16px;">⚠️</span>' : ''}
+        <div style="display:flex;flex-direction:column;gap:8px;padding:12px;
+                    background:var(--card-background-color);border-radius:8px;
+                    margin-bottom:8px;border:1px solid var(--divider-color);">
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <div style="display:flex;align-items:center;gap:12px;flex:1;">
+              <div style="font-size:24px;">${icon}</div>
+              <div style="flex:1;">
+                <div style="font-size:14px;font-weight:500;color:var(--primary-text-color);">
+                  ${entity.display_name}
+                  ${isSyncing ? ' <span style="font-size:16px;">⏳</span>' : ''}
+                  ${!lastSuccess && lastSynced ? ' <span style="font-size:16px;">⚠️</span>' : ''}
                 </div>
-                <div style="font-size: 12px; color: var(--secondary-text-color); margin-top: 2px;">
-                  ${lock.entity_id}
+                <div style="font-size:11px;color:var(--secondary-text-color);margin-top:2px;">
+                  ${eid} · ${typeLabel}
                 </div>
               </div>
             </div>
-            <div class="form-toggle" data-action="toggle-lock-access" data-lock="${lock.entity_id}" ${isSyncing ? 'style="opacity: 0.5; pointer-events: none;"' : ''}>
-              <div class="toggle-switch ${isEnabled ? 'active' : ''}" data-field="lock-access">
+            <div class="form-toggle"
+                 data-action="${isLock ? 'toggle-lock-access' : 'toggle-cover-access'}"
+                 data-lock="${eid}"
+                 data-entity="${eid}"
+                 data-user-id="${user.id}"
+                 ${isSyncing ? 'style="opacity:0.5;pointer-events:none;"' : ''}>
+              <div class="toggle-switch ${isEnabled ? 'active' : ''}" data-field="entity-access">
                 <div class="toggle-knob"></div>
               </div>
             </div>
           </div>
-          <div style="font-size: 11px; color: var(--disabled-text-color); display: flex; justify-content: space-between;">
-            <span>Last synced: ${syncTime}</span>
-            ${lastSynced && !lastSuccess ? `<span style="color: #ef4444;">Sync failed: ${syncError || 'Unknown error'}</span>` : 
-              lastSynced && lastSuccess ? `<span style="color: #10b981;">✓ Synced successfully</span>` : ''}
-          </div>
-        </div>
-      `;
+          ${isLock ? `
+            <div style="display:flex;justify-content:space-between;font-size:11px;
+                        color:var(--secondary-text-color);">
+              <span>Last synced: ${syncTime}</span>
+              ${syncError ? `<span style="color:#ef4444;">${syncError}</span>` : ''}
+            </div>` : ''}
+        </div>`;
     }).join('');
   }
 
-  getTimeAgo(date) {
-    const now = new Date();
-    const diffMs = now - date;
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMins / 60);
-    const diffDays = Math.floor(diffHours / 24);
-    
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    return `${diffDays}d ago`;
-  }
-
-  async loadUserLockAccess(userId) {
-    if (!this._selectedUser || this._selectedUser.id !== userId) return;
-    this._selectedUser._lockAccessLoading = true;
-    try {
-      const data = await this._apiFetch(`/api/locks/users/${userId}`);
-      // data.lock_access is an object keyed by entity_id
-      if (this._selectedUser && this._selectedUser.id === userId) {
-        this._selectedUser._lockAccess = data.lock_access || {};
-        this._selectedUser._lockAccessLoading = false;
-        this.render();
-      }
-    } catch (e) {
-      _hs.error('Failed to load lock access:', e);
-      if (this._selectedUser && this._selectedUser.id === userId) {
-        this._selectedUser._lockAccessLoading = false;
-        this._selectedUser._lockAccess = {};
-        this.render();
-      }
-    }
-  }
-
-  async loadUserPin(userId) {
-    // PINs are bcrypt-hashed in the container database and cannot be retrieved.
-    // This method is intentionally a no-op in v2.0.
-    if (this._selectedUser && this._selectedUser.id === userId) {
-      this._selectedUser._pinLoading = false;
-      this._selectedUser._pinFailed = true;
-      this._selectedUser._actualPin = '';
-    }
-  }
-
-  renderUserAdd() {
-    return `
-      <div class="user-detail">
-        <button class="back-btn" data-action="back-to-list">
-          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
-          </svg>
-          Back to Users
-        </button>
-
-        <div class="form-group">
-          <label class="form-label">Name *</label>
-          <input type="text" class="form-input" id="name-input" data-field="name" value="${this._editingUser.name || ''}" placeholder="Enter user name">
-          <div class="field-error" id="name-error">Name is required</div>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Alarm PIN (6-8 digits) *</label>
-          <input type="password" class="form-input" id="pin-input" data-field="pin" value="${this._editingUser.pin || ''}" placeholder="Enter PIN for arming/disarming" minlength="6" maxlength="8">
-          <div class="field-error" id="pin-error">PIN must be 6-8 digits</div>
-          <div style="font-size: 12px; color: var(--secondary-text-color); margin-top: 4px;">
-            This PIN is used for arming/disarming the alarm system
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Phone Number</label>
-          <input type="tel" class="form-input" data-field="phone" value="${this._editingUser.phone || ''}" placeholder="+1234567890">
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Email</label>
-          <input type="email" class="form-input" data-field="email" value="${this._editingUser.email || ''}" placeholder="user@example.com">
-        </div>
-
-        <div class="form-group">
-          <div class="form-toggle" data-action="toggle-admin">
-            <span class="toggle-label">Administrator</span>
-            <div class="toggle-switch ${this._editingUser.is_admin ? 'active' : ''}" data-field="is_admin">
-              <div class="toggle-knob"></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="form-group">
-          <div class="form-toggle" data-action="toggle-separate-lock-pin">
-            <span class="toggle-label">Separate PIN for Door Locks</span>
-            <div class="toggle-switch ${this._editingUser.has_separate_lock_pin ? 'active' : ''}" data-field="has_separate_lock_pin">
-              <div class="toggle-knob"></div>
-            </div>
-          </div>
-          <div style="font-size: 12px; color: var(--secondary-text-color); margin-top: 4px;">
-            Enable this if you want different PINs for the alarm vs door locks
-          </div>
-        </div>
-
-        ${this._editingUser.has_separate_lock_pin ? `
-          <div class="form-group">
-            <label class="form-label">Lock PIN (6-8 digits) *</label>
-            <input type="password" class="form-input" id="lock-pin-input" data-field="lock_pin" value="${this._editingUser.lock_pin || ''}" placeholder="Enter PIN for all door locks" minlength="6" maxlength="8">
-            <div class="field-error" id="lock-pin-error">Lock PIN must be 6-8 digits</div>
-            <div style="font-size: 12px; color: var(--secondary-text-color); margin-top: 4px;">
-              This PIN will work on all door locks
-            </div>
-          </div>
-        ` : ''}
-
-        <div class="form-actions">
-          <button class="btn btn-secondary" data-action="back-to-list">Cancel</button>
-          <button class="btn btn-primary" data-action="create-user">Create User</button>
-        </div>
-      </div>
-    `;
-  }
-
-  renderEventsTab() {
-    // Load events if not already loaded
-    if (!this._eventsLoaded) {
-      this.loadEvents();
-      this.loadEventTypes();
-      this.loadEventStats();
-      this._eventsLoaded = true;
-    }
-
-    return `
-      <div style="max-width: 1200px; margin: 0 auto;">
-        <h3 style="margin-bottom: 24px; color: var(--primary-text-color);">Event Log</h3>
-        
-        ${this.renderEventStats()}
-        
-        <div style="background: var(--card-background-color); border: 1px solid var(--divider-color); border-radius: 12px; padding: 20px; margin-bottom: 24px;">
-          <h4 style="margin-top: 0; margin-bottom: 16px;">Filters</h4>
-          
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
-            <div>
-              <label class="form-label">Event Type</label>
-              <select id="event-type-filter" class="form-input" multiple style="height: 120px;">
-                <option value="">All Events</option>
-                ${this._eventTypes.map(type => `
-                  <option value="${type}" ${this._eventFilters.eventTypes.includes(type) ? 'selected' : ''}>
-                    ${this.formatEventType(type)}
-                  </option>
-                `).join('')}
-              </select>
-            </div>
-            
-            <div>
-              <label class="form-label">Time Range</label>
-              <select id="days-filter" class="form-input">
-                <option value="1" ${this._eventFilters.days === 1 ? 'selected' : ''}>Last 24 Hours</option>
-                <option value="3" ${this._eventFilters.days === 3 ? 'selected' : ''}>Last 3 Days</option>
-                <option value="7" ${this._eventFilters.days === 7 ? 'selected' : ''}>Last 7 Days</option>
-                <option value="14" ${this._eventFilters.days === 14 ? 'selected' : ''}>Last 2 Weeks</option>
-                <option value="30" ${this._eventFilters.days === 30 ? 'selected' : ''}>Last 30 Days</option>
-              </select>
-            </div>
-            
-            <div style="display: flex; align-items: flex-end;">
-              <button class="btn btn-primary" data-action="apply-event-filters" style="width: 100%;">
-                Apply Filters
-              </button>
-            </div>
-          </div>
-        </div>
-        
-        <div style="background: var(--card-background-color); border: 1px solid var(--divider-color); border-radius: 12px; padding: 20px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-            <h4 style="margin: 0;">Recent Events (${this._events.length})</h4>
-            <button class="btn btn-secondary" data-action="refresh-events" style="padding: 8px 16px; font-size: 13px;">
-              🔄 Refresh
-            </button>
-          </div>
-          
-          ${this._events.length === 0 ? this.renderNoEvents() : this.renderEventsList()}
-        </div>
-      </div>
-    `;
-  }
-
-  renderEventStats() {
-    if (!this._eventStats) {
-      return `<div style="margin-bottom: 24px;">Loading statistics...</div>`;
-    }
-
-    const stats = this._eventStats;
-    const topEvents = Object.entries(stats.by_type || {})
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5);
-
-    return `
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px;">
-        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 12px; padding: 20px;">
-          <div style="font-size: 14px; opacity: 0.9; margin-bottom: 8px;">Total Events</div>
-          <div style="font-size: 32px; font-weight: 700;">${stats.total_events || 0}</div>
-          <div style="font-size: 12px; opacity: 0.8; margin-top: 4px;">Last ${stats.period_days} days</div>
-        </div>
-        
-        ${topEvents.map(([type, count], index) => {
-          const colors = [
-            ['#10b981', '#059669'],
-            ['#3b82f6', '#2563eb'],
-            ['#f59e0b', '#d97706'],
-            ['#ef4444', '#dc2626'],
-            ['#8b5cf6', '#7c3aed']
-          ];
-          const [color1, color2] = colors[index] || colors[0];
-          
-          return `
-            <div style="background: linear-gradient(135deg, ${color1} 0%, ${color2} 100%); color: white; border-radius: 12px; padding: 20px;">
-              <div style="font-size: 14px; opacity: 0.9; margin-bottom: 8px;">${this.formatEventType(type)}</div>
-              <div style="font-size: 32px; font-weight: 700;">${count}</div>
-              <div style="font-size: 12px; opacity: 0.8; margin-top: 4px;">${((count / stats.total_events) * 100).toFixed(1)}%</div>
-            </div>
-          `;
-        }).join('')}
-      </div>
-    `;
-  }
-
-  renderNoEvents() {
-    return `
-      <div style="text-align: center; padding: 60px 20px; color: var(--secondary-text-color);">
-        <svg width="64" height="64" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="margin: 0 auto 16px; opacity: 0.5;">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-        </svg>
-        <div style="font-size: 18px; font-weight: 600; margin-bottom: 8px;">No Events Found</div>
-        <div style="font-size: 14px;">Try adjusting your filters or check back later</div>
-      </div>
-    `;
-  }
-
-  renderEventsList() {
-    return `
-      <div style="max-height: 600px; overflow-y: auto;">
-        ${this._events.map(event => this.renderEventItem(event)).join('')}
-      </div>
-    `;
-  }
-
-  renderEventItem(event) {
-    const timestamp  = new Date(event.timestamp);
-    const timeAgo    = this.getTimeAgo(timestamp);
-
-    // details may be a JSON string or already an object
-    let details = {};
-    if (event.details) {
-      if (typeof event.details === 'string') {
-        try { details = JSON.parse(event.details); } catch { details = {}; }
-      } else {
-        details = event.details;
-      }
-    }
-
-    const eventId    = String(event.id || `${event.event_type}-${event.timestamp}`);
-    const isExpanded = this._expandedEvents.has(eventId);
-
-    const eventConfig = {
-      'door_locked':     { icon: '🔒', color: '#10b981', label: 'Door Locked' },
-      'door_unlocked':   { icon: '🔓', color: '#f59e0b', label: 'Door Unlocked' },
-      'garage_opened':   { icon: '⬆️', color: '#ef4444', label: 'Garage Opened' },
-      'garage_closed':   { icon: '⬇️', color: '#10b981', label: 'Garage Closed' },
-      'garage_opening':  { icon: '↗️', color: '#f59e0b', label: 'Garage Opening' },
-      'garage_closing':  { icon: '↘️', color: '#f59e0b', label: 'Garage Closing' },
-      'alarm_armed':     { icon: '🛡️', color: '#3b82f6', label: 'Alarm Armed' },
-      'alarm_disarmed':  { icon: '✅', color: '#10b981', label: 'Alarm Disarmed' },
-      'alarm_triggered': { icon: '🚨', color: '#ef4444', label: 'Alarm Triggered' },
-      'state_change':    { icon: '🔄', color: '#6b7280', label: 'State Change' },
-      'user_added':      { icon: '➕', color: '#10b981', label: 'User Added' },
-      'user_updated':    { icon: '✏️', color: '#6b7280', label: 'User Updated' },
-      'user_deleted':    { icon: '➖', color: '#ef4444', label: 'User Deleted' },
-      'config_updated':  { icon: '⚙️', color: '#8b5cf6', label: 'Config Updated' },
-      'lock_synced':     { icon: '🔑', color: '#10b981', label: 'Lock Synced' },
-    };
-
-    const cfg      = eventConfig[event.event_type] || { icon: '📋', color: '#6b7280', label: this.formatEventType(event.event_type) };
-    const userName = event.user_name || 'System';
-    const entity   = details.entity_name || event.zone_entity_id || '';
-
-    // Build the expanded detail rows
-    const knownKeys = new Set(['entity_name', 'previous_state', 'new_state', 'mode', 'zone', 'ip_address']);
-    const detailRows = [];
-    if (event.user_name)         detailRows.push(['By',             event.user_name]);
-    if (timestamp)               detailRows.push(['Time',           timestamp.toLocaleString()]);
-    if (entity)                  detailRows.push(['Entity',         entity]);
-    if (details.previous_state)  detailRows.push(['Previous state', details.previous_state]);
-    if (details.new_state)       detailRows.push(['New state',      details.new_state]);
-    if (details.mode)            detailRows.push(['Mode',           details.mode]);
-    if (details.zone)            detailRows.push(['Zone',           details.zone]);
-    if (details.ip_address)      detailRows.push(['IP address',     details.ip_address]);
-    // Any remaining keys not already shown
-    Object.entries(details).forEach(([k, v]) => {
-      if (!knownKeys.has(k) && v !== null && v !== undefined && v !== '')
-        detailRows.push([k.replace(/_/g, ' '), String(v)]);
-    });
-
-    const expandedHtml = isExpanded && detailRows.length > 0 ? `
-      <div style="margin-top:10px; padding:10px 12px;
-                  background:var(--secondary-background-color);
-                  border-radius:8px; font-size:12px;">
-        ${detailRows.map(([label, val]) => `
-          <div style="display:flex; gap:12px; padding:4px 0;
-                      border-bottom:1px solid var(--divider-color);">
-            <span style="color:var(--secondary-text-color); min-width:110px;
-                         flex-shrink:0; text-transform:capitalize;">${label}</span>
-            <span style="color:var(--primary-text-color); word-break:break-all;">${val}</span>
-          </div>`).join('')}
-      </div>` : '';
-
-    return `
-      <div style="border-bottom:1px solid var(--divider-color);">
-        <div data-action="toggle-event" data-event-id="${eventId}"
-             style="display:flex; gap:14px; padding:14px 16px; align-items:flex-start;
-                    cursor:pointer; user-select:none;">
-          <div style="font-size:26px; flex-shrink:0; margin-top:2px;">${cfg.icon}</div>
-          <div style="flex:1; min-width:0;">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-              <div style="font-size:14px; font-weight:600; color:var(--primary-text-color);">
-                ${cfg.label}
-                ${event.user_name
-                  ? `<span style="font-weight:400; color:${cfg.color};"> · ${userName}</span>`
-                  : ''}
-              </div>
-              <div style="display:flex; align-items:center; gap:8px; flex-shrink:0; margin-left:8px;">
-                <span style="font-size:11px; color:var(--disabled-text-color);">${timeAgo}</span>
-                <span style="font-size:11px; color:var(--secondary-text-color);">${isExpanded ? '▲' : '▼'}</span>
-              </div>
-            </div>
-            ${entity
-              ? `<div style="font-size:12px; color:var(--secondary-text-color); margin-top:2px;">${entity}</div>`
-              : ''}
-            ${details.previous_state && details.new_state ? `
-              <div style="display:flex; align-items:center; gap:6px; font-size:11px; margin-top:4px;">
-                <span style="background:var(--secondary-background-color);
-                             padding:2px 6px; border-radius:4px;">${details.previous_state}</span>
-                <span style="color:var(--secondary-text-color);">→</span>
-                <span style="background:${cfg.color}20; color:${cfg.color};
-                             padding:2px 6px; border-radius:4px; font-weight:500;">${details.new_state}</span>
-              </div>` : ''}
-            ${expandedHtml}
-          </div>
-        </div>
-      </div>`;
-  }
-
-  formatEventType(type) {
-    return type
-      .split('_')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(' ');
-  }
-
-  async loadEvents() {
-    try {
-      const params = new URLSearchParams({ limit: 100, days: this._eventFilters.days });
-      if (this._eventFilters.eventTypes.length > 0)
-        params.set('event_types', this._eventFilters.eventTypes.join(','));
-      const data = await this._apiFetch(`/api/logs?${params}`);
-      this._events = data.events || data || [];
-      this.render();
-    } catch (e) {
-      _hs.error('Failed to load events:', e);
-      this._events = [];
-    }
-  }
-
-  async loadEventTypes() {
-    try {
-      const data = await this._apiFetch('/api/logs?limit=500');
-      const events = data.events || data || [];
-      this._eventTypes = [...new Set(events.map(e => e.event_type).filter(Boolean))];
-    } catch (e) {
-      _hs.error('Failed to load event types:', e);
-      this._eventTypes = [];
-    }
-  }
-
-  async loadEventStats() {
-    try {
-      const params = new URLSearchParams({ limit: 500, days: this._eventFilters.days });
-      const data = await this._apiFetch(`/api/logs?${params}`);
-      const events = data.events || data || [];
-      // Build stats summary from raw events
-      const typeCounts = {};
-      events.forEach(e => { typeCounts[e.event_type] = (typeCounts[e.event_type] || 0) + 1; });
-      this._eventStats = { total: events.length, by_type: typeCounts };
-      this.render();
-    } catch (e) {
-      _hs.error('Failed to load event stats:', e);
-    }
-  }
-
-  async loadLocks() {
-    try {
-      const data = await this._apiFetch('/api/locks');
-      this._locks = (data.locks || []).map(l => ({
-        entity_id: l.entity_id,
-        name: l.name || l.entity_id,
-        state: l.state || 'unknown'
-      }));
-    } catch (e) {
-      _hs.error('Failed to load locks:', e);
-      this._locks = [];
-    }
-  }
-
-  renderDevicesTab() {
-    if (!this._config && !this._configLoading) this.loadConfig();
-    if (this._configLoading) {
-      return `<div style="padding:40px;text-align:center;color:var(--secondary-text-color);">Loading…</div>`;
-    }
-
-    const c = this._config || {};
-    const savedDevices = c.audio_devices ? c.audio_devices.split(',').filter(Boolean) : [];
-    const volume       = c.audio_volume !== undefined ? parseInt(c.audio_volume) : 80;
-
-    // Get all media_player entities from hass
-    const mediaPlayers = this._hass
-      ? Object.entries(this._hass.states)
-          .filter(([eid]) => eid.startsWith('media_player.'))
-          .map(([eid, state]) => ({
-            entity_id:    eid,
-            friendly_name: state.attributes.friendly_name || eid,
-            state:         state.state,
-          }))
-          .sort((a, b) => a.friendly_name.localeCompare(b.friendly_name))
-      : [];
-
-    const deviceRows = mediaPlayers.length === 0
-      ? `<div style="padding:16px;color:var(--secondary-text-color);font-size:13px;">
-           No media_player entities found. Install the HA Companion app on your tablet
-           and ensure media_player entities are available.
-         </div>`
-      : mediaPlayers.map(mp => {
-          const checked = savedDevices.includes(mp.entity_id);
-          const stateColor = mp.state === 'playing' ? '#10b981' : 'var(--secondary-text-color)';
-          return `
-            <div style="display:flex;align-items:center;gap:12px;padding:12px 0;
-                        border-bottom:1px solid var(--divider-color);">
-              <input type="checkbox" id="mp-${mp.entity_id}"
-                     data-action="toggle-audio-device"
-                     data-entity="${mp.entity_id}"
-                     ${checked ? 'checked' : ''}
-                     style="width:18px;height:18px;cursor:pointer;flex-shrink:0;">
-              <label for="mp-${mp.entity_id}" style="flex:1;cursor:pointer;">
-                <div style="font-size:14px;font-weight:500;color:var(--primary-text-color);">
-                  ${mp.friendly_name}
-                </div>
-                <div style="font-size:11px;color:${stateColor};margin-top:2px;">
-                  ${mp.entity_id} · ${mp.state}
-                </div>
-              </label>
-            </div>`;
-        }).join('');
-
-    return `
-      <div style="max-width:800px;margin:0 auto;">
-        <h3 style="margin-bottom:8px;color:var(--primary-text-color);">Devices</h3>
-        <p style="margin-top:0;margin-bottom:28px;font-size:14px;color:var(--secondary-text-color);">
-          Select media players to use for alarm audio alerts.
-        </p>
-
-        <!-- ── Audio Alert Devices ──────────────────────────────────── -->
-        <div style="background:var(--card-background-color);border:1px solid var(--divider-color);
-                    border-radius:14px;padding:24px;margin-bottom:20px;">
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
-            <span style="font-size:22px;">🔊</span>
-            <div>
-              <div style="font-size:16px;font-weight:600;color:var(--primary-text-color);">
-                Audio Alert Devices
-              </div>
-              <div style="font-size:13px;color:var(--secondary-text-color);">
-                Selected devices will beep during arming, entry delay, and on disarm
-              </div>
-            </div>
-          </div>
-
-          <div style="margin:16px 0;">
-            ${deviceRows}
-          </div>
-
-          <!-- Volume -->
-          <div style="margin-top:20px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-              <label style="font-size:14px;font-weight:500;color:var(--primary-text-color);">
-                Alert volume
-              </label>
-              <span id="volume-display" style="font-size:14px;color:var(--secondary-text-color);">
-                ${volume}%
-              </span>
-            </div>
-            <input type="range" id="audio-volume" data-action="set-audio-volume"
-                   min="10" max="100" step="5" value="${volume}"
-                   style="width:100%;accent-color:var(--primary-color);">
-          </div>
-
-          <button data-action="save-audio-devices"
-                  style="margin-top:20px;padding:10px 20px;background:var(--primary-color);
-                         color:white;border:none;border-radius:8px;cursor:pointer;
-                         font-size:14px;font-weight:500;">
-            Save Audio Settings
-          </button>
-        </div>
-
-        <!-- ── Alert Behavior ───────────────────────────────────────── -->
-        <div style="background:var(--card-background-color);border:1px solid var(--divider-color);
-                    border-radius:14px;padding:24px;margin-bottom:20px;">
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-            <span style="font-size:22px;">📋</span>
-            <div style="font-size:16px;font-weight:600;color:var(--primary-text-color);">
-              Alert Behavior
-            </div>
-          </div>
-          <div style="font-size:13px;color:var(--secondary-text-color);line-height:1.8;">
-            <div>🔔 <strong>Arming Away</strong> — short beep every 2 seconds during exit delay,
-                 one long beep when armed</div>
-            <div>🏠 <strong>Arm Home</strong> — one long beep immediately</div>
-            <div>⚠️ <strong>Entry delay</strong> — longer beep every 2 seconds until disarmed</div>
-            <div>✅ <strong>Disarm</strong> — one short confirmation beep</div>
-          </div>
-        </div>
-      </div>`;
-  }
 
   renderSecurityTab() {
     if (!this._config && !this._configLoading) {
@@ -2056,6 +1558,8 @@ class HomeSecureAdmin extends HTMLElement {
   }
 
   renderGeneralTab() {
+    // Load managed entities if not yet loaded
+    if (!this._managedEntities.length) this.loadManagedEntities();
     if (!this._config && !this._configLoading) {
       this.loadConfig();
     }
@@ -2215,8 +1719,147 @@ class HomeSecureAdmin extends HTMLElement {
           </div>
         </div>
 
+        <!-- ── Managed Entities ───────────────────────────────────────────── -->
+        <div style="background: var(--card-background-color); border: 1px solid var(--divider-color); border-radius: 14px; padding: 24px; margin-bottom: 28px;">
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
+            <span style="font-size: 22px;">🔗</span>
+            <div>
+              <div style="font-size: 16px; font-weight: 600; color: var(--primary-text-color);">Managed Entities</div>
+              <div style="font-size: 13px; color: var(--secondary-text-color);">
+                The locks and covers HomeSecure tracks for per-user access control.
+                These appear in each user's Entity Access section.
+              </div>
+            </div>
+          </div>
+
+          <div style="margin: 16px 0;">
+            ${(this._managedEntities || []).length === 0
+              ? `<div style="font-size:13px;color:var(--secondary-text-color);padding:12px 0;">
+                   No managed entities yet. Add locks and covers below.
+                 </div>`
+              : (this._managedEntities || []).map(e => `
+                  <div style="display:flex;align-items:center;gap:12px;padding:10px 0;
+                              border-bottom:1px solid var(--divider-color);">
+                    <span style="font-size:18px;">${e.entity_type === 'lock' ? '🔒' : '🚗'}</span>
+                    <div style="flex:1;">
+                      <div style="font-size:14px;font-weight:500;color:var(--primary-text-color);">
+                        ${e.display_name}
+                      </div>
+                      <div style="font-size:11px;color:var(--secondary-text-color);">
+                        ${e.entity_id} · ${e.entity_type}
+                      </div>
+                    </div>
+                    <button data-action="remove-managed-entity" data-entity-id="${e.entity_id}"
+                            style="padding:4px 10px;border-radius:6px;border:1px solid var(--error-color);
+                                   background:transparent;color:var(--error-color);cursor:pointer;font-size:12px;">
+                      Remove
+                    </button>
+                  </div>`).join('')}
+          </div>
+
+          <!-- Add entity form -->
+          <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--divider-color);">
+            <div style="font-size:13px;font-weight:600;color:var(--primary-text-color);margin-bottom:10px;">
+              Add Entity
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+              <div style="flex:2;min-width:160px;">
+                <div style="font-size:12px;color:var(--secondary-text-color);margin-bottom:4px;">Entity</div>
+                <select id="new-managed-entity-id" style="width:100%;padding:8px;border-radius:6px;
+                        border:1px solid var(--divider-color);background:var(--secondary-background-color);
+                        color:var(--primary-text-color);font-size:13px;">
+                  <option value="">Select entity…</option>
+                  ${Object.entries(this._hass?.states || {})
+                    .filter(([id]) => id.startsWith('lock.') || id.startsWith('cover.'))
+                    .sort(([a],[b]) => a.localeCompare(b))
+                    .map(([id, state]) => {
+                      const alreadyManaged = (this._managedEntities || []).some(e => e.entity_id === id);
+                      if (alreadyManaged) return '';
+                      const name = state.attributes.friendly_name || id;
+                      return `<option value="${id}">${name} (${id})</option>`;
+                    }).join('')}
+                </select>
+              </div>
+              <div style="flex:1;min-width:120px;">
+                <div style="font-size:12px;color:var(--secondary-text-color);margin-bottom:4px;">Display Name</div>
+                <input type="text" id="new-managed-entity-name" placeholder="Front Door"
+                       style="width:100%;padding:8px;border-radius:6px;box-sizing:border-box;
+                              border:1px solid var(--divider-color);background:var(--secondary-background-color);
+                              color:var(--primary-text-color);font-size:13px;">
+              </div>
+              <button data-action="add-managed-entity"
+                      style="padding:8px 16px;background:var(--primary-color);color:white;
+                             border:none;border-radius:6px;cursor:pointer;font-size:13px;
+                             white-space:nowrap;">
+                + Add
+              </button>
+            </div>
+          </div>
+        </div>
+
       </div>
     `;
+  }
+
+  async loadLocks() {
+    try {
+      const data = await this._apiFetch('/api/locks');
+      this._locks = data.locks || [];
+    } catch (e) {
+      _hs.error('Failed to load locks:', e);
+      this._locks = [];
+    }
+  }
+
+  async loadUserLockAccess(userId) {
+    if (!this._selectedUser || this._selectedUser.id !== userId) return;
+    this._selectedUser._lockAccessLoading = true;
+    try {
+      const data = await this._apiFetch(`/api/locks/users/${userId}`);
+      if (this._selectedUser && this._selectedUser.id === userId) {
+        this._selectedUser._lockAccess        = data.lock_access || {};
+        this._selectedUser._lockAccessLoading = false;
+        this._selectedUser.slot_number        = data.slot || null;
+        this.render();
+      }
+    } catch (e) {
+      _hs.error('Failed to load lock access:', e);
+      if (this._selectedUser && this._selectedUser.id === userId) {
+        this._selectedUser._lockAccessLoading = false;
+        this._selectedUser._lockAccess = {};
+        this.render();
+      }
+    }
+  }
+
+  async loadUserEntityAccess(userId) {
+    if (!this._selectedUser || this._selectedUser.id !== userId) return;
+    this._selectedUser._entityAccessLoading = true;
+    try {
+      const data = await this._apiFetch(`/api/users/${userId}/entity-access`);
+      if (this._selectedUser && this._selectedUser.id === userId) {
+        this._selectedUser._entityAccess        = data.entity_access || {};
+        this._selectedUser._entityAccessLoading = false;
+        this.render();
+      }
+    } catch (e) {
+      _hs.error('Failed to load entity access:', e);
+      if (this._selectedUser && this._selectedUser.id === userId) {
+        this._selectedUser._entityAccessLoading = false;
+        this._selectedUser._entityAccess = {};
+        this.render();
+      }
+    }
+  }
+
+  async loadManagedEntities() {
+    try {
+      const data = await this._apiFetch('/api/entities');
+      this._managedEntities = data.entities || [];
+    } catch (e) {
+      _hs.error('Failed to load managed entities:', e);
+      this._managedEntities = [];
+    }
   }
 
   async loadConfig() {
@@ -2583,6 +2226,59 @@ class HomeSecureAdmin extends HTMLElement {
       });
     });
 
+    // ── Managed entities ─────────────────────────────────────────────────────
+    this.shadowRoot.querySelectorAll('[data-action="add-managed-entity"]').forEach(el => {
+      el.addEventListener('click', async () => {
+        const entityId   = this.shadowRoot.getElementById('new-managed-entity-id')?.value;
+        const nameInput  = this.shadowRoot.getElementById('new-managed-entity-name');
+        const displayName = nameInput?.value.trim() || entityId;
+        if (!entityId) return this.showNotification('Select an entity', 'error');
+        const entityType = entityId.startsWith('lock.') ? 'lock' : 'cover';
+        try {
+          await this._apiPost('/api/entities', {
+            admin_pin: this._adminPin, entity_id: entityId,
+            entity_type: entityType, display_name: displayName,
+          });
+          await this.loadManagedEntities();
+          this.showNotification(`Added ${displayName}`, 'success');
+          this.render();
+        } catch (e) {
+          _hs.error('Failed to add entity:', e);
+          this.showNotification('Failed to add entity', 'error');
+        }
+      });
+    });
+
+    this.shadowRoot.querySelectorAll('[data-action="remove-managed-entity"]').forEach(el => {
+      el.addEventListener('click', async () => {
+        const entityId = el.dataset.entityId;
+        try {
+          await this._apiDelete(`/api/entities/${encodeURIComponent(entityId)}`, {
+            admin_pin: this._adminPin,
+          });
+          await this.loadManagedEntities();
+          this.showNotification('Entity removed', 'info');
+          this.render();
+        } catch (e) {
+          _hs.error('Failed to remove entity:', e);
+          this.showNotification('Failed to remove entity', 'error');
+        }
+      });
+    });
+
+    // Auto-fill display name from HA friendly_name when entity is selected
+    const entitySelect = this.shadowRoot.getElementById('new-managed-entity-id');
+    const nameInput    = this.shadowRoot.getElementById('new-managed-entity-name');
+    if (entitySelect && nameInput) {
+      entitySelect.addEventListener('change', () => {
+        const eid   = entitySelect.value;
+        const state = this._hass?.states[eid];
+        if (state && !nameInput.value) {
+          nameInput.value = state.attributes.friendly_name || eid;
+        }
+      });
+    }
+
     // ── Toggle: debug mode ──────────────────────────────────────────────────
     this.shadowRoot.querySelectorAll('[data-action="toggle-debug-mode"]').forEach(el => {
       el.addEventListener('click', () => {
@@ -2895,9 +2591,41 @@ class HomeSecureAdmin extends HTMLElement {
       });
     });
 
+    // Cover entity access toggle
+    this.shadowRoot.querySelectorAll('[data-action="toggle-cover-access"]').forEach(el => {
+      el.addEventListener('click', async (e) => {
+        const entityId = el.dataset.entity;
+        const userId   = parseInt(el.dataset.userId);
+        const toggle   = e.currentTarget.querySelector('.toggle-switch');
+        const isEnabled = toggle.classList.contains('active');
+        if (!this._selectedUser || this._selectedUser.id !== userId) return;
+
+        // Optimistic update
+        if (!this._selectedUser._entityAccess) this._selectedUser._entityAccess = {};
+        this._selectedUser._entityAccess[entityId] = !isEnabled;
+        this.render();
+
+        try {
+          await this._apiPost(`/api/users/${userId}/entity-access`, {
+            entity_id: entityId,
+            enabled:   !isEnabled,
+          });
+          this.showNotification(
+            `${!isEnabled ? 'Enabled' : 'Disabled'} access for ${entityId}`, 'success'
+          );
+        } catch (e) {
+          _hs.error('Failed to set cover access:', e);
+          // Revert
+          this._selectedUser._entityAccess[entityId] = isEnabled;
+          this.showNotification('Failed to update entity access', 'error');
+          this.render();
+        }
+      });
+    });
+
     this.shadowRoot.querySelectorAll('[data-action="retrieve-pin"]').forEach(el => {
       el.addEventListener('click', () => {
-        // PINs are bcrypt-hashed in v2.0 — cannot be retrieved from the container
+        // PINs are bcrypt-hashed in v2.1 — cannot be retrieved from the container
         this.showNotification('PIN retrieval is not available — PINs are stored as one-way hashes', 'info');
       });
     });
@@ -2953,6 +2681,8 @@ class HomeSecureAdmin extends HTMLElement {
         
         this._eventsLoaded = false;
     this._expandedEvents = new Set();
+    this._managedEntities = [];
+    this._locks = [];
         this.render();
       });
     });
@@ -2961,6 +2691,8 @@ class HomeSecureAdmin extends HTMLElement {
       el.addEventListener('click', () => {
         this._eventsLoaded = false;
     this._expandedEvents = new Set();
+    this._managedEntities = [];
+    this._locks = [];
         this.render();
       });
     });

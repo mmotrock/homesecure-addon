@@ -1,6 +1,6 @@
 # HomeSecure v2.0 — Home Assistant Automation Templates
 #
-# In v2.0 the HomeSecure container cannot directly observe HA entity states
+# In v2.1 the HomeSecure container cannot directly observe HA entity states
 # or call HA services.  These automations bridge that gap:
 #
 #   1. Zone Trigger    — tells the container when a sensor opens while armed

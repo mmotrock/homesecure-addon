@@ -1,8 +1,8 @@
 /**
- * HomeSecure Badge Card v2.0
+ * HomeSecure Badge Card v2.1
  * Custom Lovelace card for HomeSecure System
  *
- * In v2.0 arm/disarm calls go directly to the container REST API.
+ * In v2.1 arm/disarm calls go directly to the container REST API.
  * Entry point lock/cover toggles still use HA services (they are native HA entities).
  *
  * Config options:
@@ -65,6 +65,9 @@ class HomeSecureCard extends HTMLElement {
     this._serverConfig = {};
     this._configLoaded = false;
     this._prevEntityState = null;  // track state changes for audio
+    this._hsUserId       = null;   // matched HomeSecure user id
+    this._userAccessMap  = null;   // {entity_id: bool} from server
+    this._userLookupDone = false;  // only look up once per session
     this._beepInterval    = null;  // repeating beep timer
     this._audioDevices    = [];    // cached from server config
     this._audioVolume     = 0.8;   // 0-1
@@ -104,6 +107,11 @@ class HomeSecureCard extends HTMLElement {
 
     // Load server config once so we know if PIN is required to arm
     if (!oldHass && this._apiUrl) this._loadServerConfig();
+    // Look up the logged-in HA user's HomeSecure user once per session
+    if (!this._userLookupDone && this._hass?.user?.id && this._apiUrl) {
+      this._userLookupDone = true;
+      this._lookupHaUser(this._hass.user.id);
+    }
 
     if (this.entity) {
       // Detect state changes for audio alerts
@@ -116,6 +124,41 @@ class HomeSecureCard extends HTMLElement {
       if (!this._showAdmin) {
         this.render();
       }
+    }
+  }
+
+  async _lookupHaUser(haUserId) {
+    try {
+      const resp = await fetch(
+        `${this._apiUrl}/api/users/by-ha-id/${encodeURIComponent(haUserId)}`,
+        { headers: this._authHeaders() }
+      );
+      if (resp.status === 404) {
+        // No matching HomeSecure user — show no entry points
+        this._hsUserId      = null;
+        this._userAccessMap = {};
+        _hs.log('No HomeSecure user matched HA user', haUserId);
+        this.render();
+        return;
+      }
+      if (!resp.ok) return;
+      const data = await resp.json();
+      if (data.found && data.user) {
+        this._hsUserId = data.user.id;
+        // Load entity access for this user
+        const accessResp = await fetch(
+          `${this._apiUrl}/api/users/${this._hsUserId}/entity-access`,
+          { headers: this._authHeaders() }
+        );
+        if (accessResp.ok) {
+          const accessData = await accessResp.json();
+          this._userAccessMap = accessData.entity_access || {};
+          _hs.log('Entity access loaded for HS user', this._hsUserId, this._userAccessMap);
+        }
+        this.render();
+      }
+    } catch (e) {
+      _hs.warn('User lookup failed:', e);
     }
   }
 
@@ -803,7 +846,10 @@ class HomeSecureCard extends HTMLElement {
     const state = this.entity.state;
     const isArmed = !['disarmed', 'arming'].includes(state);
     const { color, icon, text, description } = this.getStateInfo(state);
-    const entryPoints = this.config.entry_points || [];
+    const allEntryPoints = this.config.entry_points || [];
+    const entryPoints = this._userAccessMap === null
+      ? allEntryPoints
+      : allEntryPoints.filter(ep => this._userAccessMap[ep.entity_id]);
 
     const badgeHtml = `
       <button class="admin-btn" data-action="open-admin" title="Admin Panel">

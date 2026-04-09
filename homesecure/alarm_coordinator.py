@@ -36,7 +36,7 @@ VALID_AUTO_ACTIONS = {"none", "disarm", "rearm"}
 
 # ── fields an admin is allowed to update on a user record ────────────────────
 ALLOWED_UPDATE_FIELDS = {
-    "name", "pin", "phone", "email", "enabled",
+    "name", "pin", "phone", "email", "enabled", "ha_user_id",
     "is_admin", "is_duress", "has_separate_lock_pin", "lock_pin",
 }
 

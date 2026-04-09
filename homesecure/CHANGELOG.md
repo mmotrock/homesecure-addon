@@ -428,3 +428,58 @@ Failed attempts are intentionally not migrated. The service PIN is regenerated f
   normal card operation. All logging now goes through `_hs` shared logger
   which is silent by default and verbose only when debug mode is enabled
   (admin General tab toggle or `localStorage.setItem('homesecure_debug','1')`).
+
+---
+
+## [2.1.0] - 2026-04-09
+
+### Added
+
+#### Per-User Entity Access Tied to HA Accounts
+- **Managed Entities** — new section in the admin General tab. Add any `lock.*`
+  or `cover.*` HA entity to HomeSecure's managed list with a display name.
+  This becomes the master list for per-user access control.
+- **HA Account Linking** — each HomeSecure user now has a "Linked HA Account"
+  field (add/edit user forms). Populated from `person.*` entities in HA,
+  which carry the HA user UUID in their `user_id` attribute.
+- **Unified Entity Access section** — replaces the lock-only access section in
+  user edit. Shows all managed entities (locks and covers) with on/off toggles.
+  Lock toggles still sync to Z-Wave. Cover toggles store a DB flag.
+- **Badge card filtering** — on load the badge card calls
+  `GET /api/users/by-ha-id/{hass.user.id}` to find the matching HomeSecure
+  user, then `GET /api/users/{id}/entity-access` to get their enabled entities.
+  Entry point toggles are filtered to only show entities the logged-in HA user
+  has enabled. If no HA user matches, no entry points are shown. If the lookup
+  hasn't completed yet, all entry points are shown temporarily.
+
+#### New API Endpoints
+- `GET  /api/entities` — list all managed entities
+- `POST /api/entities` — add a managed entity (admin PIN required)
+- `DELETE /api/entities/{entity_id}` — remove a managed entity
+- `GET  /api/users/by-ha-id/{ha_user_id}` — look up HomeSecure user by HA UUID
+- `GET  /api/users/{id}/entity-access` — get all entity access flags for a user
+- `POST /api/users/{id}/entity-access` — set a cover entity access flag
+
+#### New Database Tables
+- `managed_entities` — master list of lock/cover entities HomeSecure tracks
+- `user_entity_access` — per-user access flags for cover entities
+
+### Fixed
+- **HA startup timeout** — the WebSocket listener task was being started during
+  `async_setup_entry`, which blocked HA's bootstrap phase (strict timeout).
+  Setup now only does a quick HTTP connectivity check. The WS listener starts
+  after `homeassistant_started` fires, outside the bootstrap phase entirely.
+- **Missing config column migrations** — `audio_devices`, `audio_volume`,
+  `arm_home_actions`, and `arm_away_actions` were added to `VALID_CONFIG_KEYS`
+  but not to the DB migration list, causing `no such column` errors on existing
+  installations. All four are now in the migrations list with correct defaults
+  and will be added via `ALTER TABLE` on next container startup.
+
+### Changed
+- `integration/api_client.py` — `async_start()` split into `async_connect()`
+  (validates connectivity, safe to call during setup) and `async_start_ws()`
+  (starts WS background task, called after HA startup). `async_start()` kept
+  as a legacy wrapper that calls both.
+- `database.py` — `ha_user_id TEXT` column added to `alarm_users` table.
+  `update_user()` now accepts `ha_user_id` parameter.
+- `alarm_coordinator.py` — `ha_user_id` added to `ALLOWED_UPDATE_FIELDS`.

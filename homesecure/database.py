@@ -18,7 +18,9 @@ TABLE_USERS          = "alarm_users"
 TABLE_CONFIG         = "alarm_config"
 TABLE_EVENTS         = "alarm_events"
 TABLE_FAILED_ATTEMPTS = "failed_attempts"
-TABLE_ZONES          = "alarm_zones"
+TABLE_ZONES              = "alarm_zones"
+TABLE_MANAGED_ENTITIES   = "managed_entities"
+TABLE_USER_ENTITY_ACCESS = "user_entity_access"
 
 # ── defaults ──────────────────────────────────────────────────────────────────
 DEFAULT_ENTRY_DELAY   = 30
@@ -102,6 +104,7 @@ class AlarmDatabase:
                     has_separate_lock_pin INTEGER DEFAULT 0,
                     lock_pin_hash        TEXT,
                     lock_pin_cache       TEXT,
+                    ha_user_id           TEXT,
                     created_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     last_used            TIMESTAMP,
                     use_count            INTEGER DEFAULT 0
@@ -206,12 +209,34 @@ class AlarmDatabase:
                 )
             """)
 
+            # Managed entities — the master list of lock/cover entities HomeSecure controls
+            cur.execute(f"""
+                CREATE TABLE IF NOT EXISTS {TABLE_MANAGED_ENTITIES} (
+                    entity_id    TEXT PRIMARY KEY,
+                    entity_type  TEXT NOT NULL CHECK(entity_type IN ('lock','cover')),
+                    display_name TEXT NOT NULL,
+                    created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Per-user access for cover entities (locks use user_lock_access)
+            cur.execute(f"""
+                CREATE TABLE IF NOT EXISTS {TABLE_USER_ENTITY_ACCESS} (
+                    user_id     INTEGER NOT NULL,
+                    entity_id   TEXT NOT NULL,
+                    enabled     INTEGER DEFAULT 0,
+                    updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (user_id, entity_id)
+                )
+            """)
+
             # Indexes
             for ddl in [
                 f"CREATE INDEX IF NOT EXISTS idx_events_ts ON {TABLE_EVENTS}(timestamp DESC)",
                 f"CREATE INDEX IF NOT EXISTS idx_failed_ts ON {TABLE_FAILED_ATTEMPTS}(timestamp DESC)",
                 "CREATE INDEX IF NOT EXISTS idx_ula_user ON user_lock_access(user_id)",
                 "CREATE INDEX IF NOT EXISTS idx_ula_lock ON user_lock_access(lock_entity_id)",
+                f"CREATE INDEX IF NOT EXISTS idx_uea_user ON {TABLE_USER_ENTITY_ACCESS}(user_id)",
             ]:
                 cur.execute(ddl)
 
@@ -227,11 +252,16 @@ class AlarmDatabase:
             migrations = [
                 ("service_pin",         "TEXT"),
                 ("lock_pin_cache",      "TEXT"),
+                ("ha_user_id",          "TEXT"),
                 ("max_failed_attempts", "INTEGER DEFAULT 5"),
                 ("lockout_duration",    "INTEGER DEFAULT 300"),
                 ("alarm_auto_action",   "TEXT    DEFAULT 'none'"),
                 ("require_pin_to_arm",  "INTEGER DEFAULT 0"),
                 ("log_retention_days",  "INTEGER DEFAULT 90"),
+                ("audio_devices",       "TEXT    DEFAULT ''"),
+                ("audio_volume",        "INTEGER DEFAULT 80"),
+                ("arm_home_actions",    "TEXT    DEFAULT '[]'"),
+                ("arm_away_actions",    "TEXT    DEFAULT '[]'"),
             ]
             for col, col_def in migrations:
                 if col not in existing_cols:
@@ -361,6 +391,80 @@ class AlarmDatabase:
             )
             conn.commit()
 
+    # ── Managed entities ──────────────────────────────────────────────────────
+
+    def get_managed_entities(self) -> List[Dict]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"SELECT entity_id, entity_type, display_name FROM {TABLE_MANAGED_ENTITIES} ORDER BY entity_type, display_name"
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def set_managed_entity(self, entity_id: str, entity_type: str, display_name: str) -> bool:
+        try:
+            with self._conn() as conn:
+                conn.execute(
+                    f"INSERT OR REPLACE INTO {TABLE_MANAGED_ENTITIES} (entity_id, entity_type, display_name) VALUES (?,?,?)",
+                    (entity_id, entity_type, display_name),
+                )
+                conn.commit()
+                return True
+        except Exception as exc:
+            _LOGGER.error("set_managed_entity error: %s", exc)
+            return False
+
+    def remove_managed_entity(self, entity_id: str) -> bool:
+        try:
+            with self._conn() as conn:
+                conn.execute(f"DELETE FROM {TABLE_MANAGED_ENTITIES} WHERE entity_id=?", (entity_id,))
+                conn.execute(f"DELETE FROM {TABLE_USER_ENTITY_ACCESS} WHERE entity_id=?", (entity_id,))
+                conn.commit()
+                return True
+        except Exception as exc:
+            _LOGGER.error("remove_managed_entity error: %s", exc)
+            return False
+
+    # ── User entity access (covers) ────────────────────────────────────────────
+
+    def get_user_entity_access(self, user_id: int) -> Dict[str, bool]:
+        """Return {entity_id: enabled} for all managed entities for a user."""
+        managed = {e["entity_id"]: e for e in self.get_managed_entities()}
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"SELECT entity_id, enabled FROM {TABLE_USER_ENTITY_ACCESS} WHERE user_id=?",
+                (user_id,),
+            ).fetchall()
+        access = {r["entity_id"]: bool(r["enabled"]) for r in rows}
+        # Fill in defaults for any managed entities not yet in user's access table
+        for eid in managed:
+            if eid not in access:
+                access[eid] = False
+        return access
+
+    def set_user_entity_access(self, user_id: int, entity_id: str, enabled: bool) -> bool:
+        try:
+            with self._conn() as conn:
+                conn.execute(
+                    f"""INSERT INTO {TABLE_USER_ENTITY_ACCESS} (user_id, entity_id, enabled, updated_at)
+                        VALUES (?,?,?,CURRENT_TIMESTAMP)
+                        ON CONFLICT(user_id, entity_id) DO UPDATE SET
+                            enabled=excluded.enabled, updated_at=excluded.updated_at""",
+                    (user_id, entity_id, int(enabled)),
+                )
+                conn.commit()
+                return True
+        except Exception as exc:
+            _LOGGER.error("set_user_entity_access error: %s", exc)
+            return False
+
+    def get_user_by_ha_id(self, ha_user_id: str) -> Optional[Dict]:
+        with self._conn() as conn:
+            row = conn.execute(
+                f"SELECT * FROM {TABLE_USERS} WHERE ha_user_id=? AND enabled=1",
+                (ha_user_id,),
+            ).fetchone()
+            return dict(row) if row else None
+
     def get_users(self) -> List[Dict]:
         with self._conn() as conn:
             cur = conn.cursor()
@@ -407,6 +511,7 @@ class AlarmDatabase:
         enabled: Optional[bool] = None,
         phone: Optional[str] = None,
         email: Optional[str] = None,
+        ha_user_id: Optional[str] = None,
         has_separate_lock_pin: Optional[bool] = None,
         lock_pin: Optional[str] = None,
     ) -> bool:
@@ -425,6 +530,8 @@ class AlarmDatabase:
             updates.append("email=?"); values.append(email)
         if has_separate_lock_pin is not None:
             updates.append("has_separate_lock_pin=?"); values.append(int(has_separate_lock_pin))
+        if ha_user_id is not None:
+            updates.append("ha_user_id=?"); values.append(ha_user_id)
         if lock_pin is not None:
             updates.append("lock_pin_hash=?"); values.append(self.hash_pin(lock_pin))
         if not updates:
