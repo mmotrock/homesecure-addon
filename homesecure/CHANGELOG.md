@@ -321,7 +321,7 @@ Failed attempts are intentionally not migrated. The service PIN is regenerated f
 
 ---
 
-## [2.0.1] - 2026-04-07
+## [2.0.2] - 2026-04-07
 
 ### Added
 - **Arm Actions** — Security tab now has an "Arm Actions" section with separate
