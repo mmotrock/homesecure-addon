@@ -12,7 +12,11 @@ if [ "${DEBUG_LOGGING}" = "true" ]; then
 fi
 
 bashio::log.info "======================================================="
+<<<<<<< HEAD
 bashio::log.info " HomeSecure Container  v2.1.0"
+=======
+bashio::log.info " HomeSecure Container  v2.0.2"
+>>>>>>> fix/v2.0.1
 bashio::log.info "======================================================="
 bashio::log.info " Z-Wave JS : ${ZWAVE_URL}"
 bashio::log.info " Log level : ${LOG_LEVEL}"
@@ -21,7 +25,7 @@ bashio::log.info "======================================================="
 # ── Auto-install / update the HA integration ──────────────────────────────
 INTEGRATION_SRC="/app/custom_components/homesecure"
 INTEGRATION_DST="/config/custom_components/homesecure"
-ADDON_VERSION=$(bashio::addon.version 2>/dev/null || grep -m1 '^version:' /app/custom_components/homesecure/../../../config.yaml 2>/dev/null | tr -d '"' | awk '{print $2}' || echo "2.0.1")
+ADDON_VERSION=$(bashio::addon.version 2>/dev/null || grep -m1 '^version:' /app/custom_components/homesecure/../../../config.yaml 2>/dev/null | tr -d '"' | awk '{print $2}' || echo "2.0.2")
 
 _installed_version() {
     local manifest="${INTEGRATION_DST}/manifest.json"

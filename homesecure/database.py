@@ -258,8 +258,11 @@ class AlarmDatabase:
                 ("alarm_auto_action",   "TEXT    DEFAULT 'none'"),
                 ("require_pin_to_arm",  "INTEGER DEFAULT 0"),
                 ("log_retention_days",  "INTEGER DEFAULT 90"),
+<<<<<<< HEAD
                 ("audio_devices",       "TEXT    DEFAULT ''"),
                 ("audio_volume",        "INTEGER DEFAULT 80"),
+=======
+>>>>>>> fix/v2.0.1
                 ("arm_home_actions",    "TEXT    DEFAULT '[]'"),
                 ("arm_away_actions",    "TEXT    DEFAULT '[]'"),
             ]
