@@ -35,11 +35,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     api_client = HomeSecureAPIClient(hass, container_url, api_token)
 
-    # Fetch initial state synchronously to validate connectivity
-    # but start the WS listener as a background task so it does not
-    # block HA's startup phase (which has a strict timeout).
     try:
-        await api_client.async_connect()
+        await api_client.async_start()
     except Exception as exc:
         _LOGGER.error("Cannot connect to HomeSecure container at %s: %s",
                       container_url, exc)
@@ -51,14 +48,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-
-    # Start WS listener after platforms are set up, outside the startup phase
-    entry.async_on_unload(
-        hass.bus.async_listen_once(
-            "homeassistant_started",
-            lambda _: api_client.async_start_ws(),
-        )
-    )
 
     _LOGGER.info(
         "HomeSecure integration connected to container at %s", container_url

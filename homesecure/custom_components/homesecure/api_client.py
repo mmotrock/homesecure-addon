@@ -52,30 +52,20 @@ class HomeSecureAPIClient:
     #  Lifecycle                                                           #
     # ------------------------------------------------------------------ #
 
-    async def async_connect(self) -> None:
-        """Validate connectivity and fetch initial state.
-        Called during HA setup — must not start long-running tasks."""
+    async def async_start(self) -> None:
         self._session = async_get_clientsession(self._hass)
         self._running = True
+
+        # Fetch current state immediately
         try:
             state = await self.get_state()
             self._update_state(state)
         except Exception as exc:
             _LOGGER.warning("Could not fetch initial state: %s", exc)
 
-    def async_start_ws(self) -> None:
-        """Start the WebSocket listener as a background task.
-        Called after homeassistant_started so it does not block setup."""
-        if self._ws_task is None or self._ws_task.done():
-            self._ws_task = self._hass.async_create_task(
-                self._ws_listener_loop(), "homesecure_ws"
-            )
-            _LOGGER.debug("HomeSecure WebSocket listener started")
-
-    async def async_start(self) -> None:
-        """Legacy entry point — connects and starts WS immediately."""
-        await self.async_connect()
-        self.async_start_ws()
+        self._ws_task = self._hass.async_create_task(
+            self._ws_listener_loop(), "homesecure_ws"
+        )
 
     async def async_stop(self) -> None:
         self._running = False

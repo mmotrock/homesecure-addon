@@ -205,14 +205,6 @@ class APIServer:
         # Health / ingress
         r.add_route("OPTIONS", "/{tail:.*}",         self._options_handler)
         r.add_get ("/api/bootstrap",                  self._get_bootstrap)
-        # Managed entities
-        r.add_get ("/api/entities",                     self._get_entities)
-        r.add_post("/api/entities",                     self._add_entity)
-        r.add_delete("/api/entities/{entity_id:.+}",   self._remove_entity)
-        # User entity access + HA user lookup
-        r.add_get ("/api/users/by-ha-id/{ha_user_id}", self._get_user_by_ha_id)
-        r.add_get ("/api/users/{user_id}/entity-access",     self._get_user_entity_access)
-        r.add_post("/api/users/{user_id}/entity-access",     self._set_user_entity_access)
         r.add_get ("/api/debug/status",              self._debug_status)
         r.add_post("/api/debug/clear-lockout",       self._debug_clear_lockout)
         r.add_get ("/",                                 self._index)
@@ -641,57 +633,6 @@ class APIServer:
         _LOGGER.info("Failed attempts cleared via debug endpoint")
         return web.json_response({"success": True, "message": "Lockout cleared"})
 
-    async def _get_entities(self, request: web.Request) -> web.Response:
-        if not _check_auth(request): return _auth_error()
-        return web.json_response({"entities": self.database.get_managed_entities()})
-
-    async def _add_entity(self, request: web.Request) -> web.Response:
-        if not _check_auth(request): return _auth_error()
-        body         = await self._json(request)
-        entity_id    = body.get("entity_id", "").strip()
-        entity_type  = body.get("entity_type", "")
-        display_name = body.get("display_name", entity_id).strip()
-        if not entity_id or entity_type not in ("lock", "cover"):
-            return web.json_response({"error": "entity_id and entity_type (lock|cover) required"}, status=400)
-        ok = self.database.set_managed_entity(entity_id, entity_type, display_name)
-        return web.json_response({"success": ok}, status=200 if ok else 500)
-
-    async def _remove_entity(self, request: web.Request) -> web.Response:
-        if not _check_auth(request): return _auth_error()
-        entity_id = request.match_info["entity_id"]
-        try:
-            ok = self.database.remove_managed_entity(entity_id)
-            return web.json_response({"success": ok})
-        except Exception as exc:
-            _LOGGER.error("remove_entity error: %s", exc)
-            return web.json_response({"error": str(exc)}, status=500)
-
-    async def _get_user_by_ha_id(self, request: web.Request) -> web.Response:
-        # No admin auth — badge card calls this to identify the logged-in user
-        ha_user_id = request.match_info["ha_user_id"]
-        user = self.database.get_user_by_ha_id(ha_user_id)
-        if not user:
-            return web.json_response({"found": False}, status=404)
-        safe = {k: v for k, v in user.items() if "hash" not in k and "cache" not in k}
-        return web.json_response({"found": True, "user": safe})
-
-    async def _get_user_entity_access(self, request: web.Request) -> web.Response:
-        # No admin auth — badge card calls this for the logged-in user
-        user_id = int(request.match_info["user_id"])
-        access  = self.database.get_user_entity_access(user_id)
-        return web.json_response({"entity_access": access})
-
-    async def _set_user_entity_access(self, request: web.Request) -> web.Response:
-        if not _check_auth(request): return _auth_error()
-        user_id   = int(request.match_info["user_id"])
-        body      = await self._json(request)
-        entity_id = body.get("entity_id", "")
-        enabled   = bool(body.get("enabled", False))
-        if not entity_id:
-            return web.json_response({"error": "entity_id required"}, status=400)
-        ok = self.database.set_user_entity_access(user_id, entity_id, enabled)
-        return web.json_response({"success": ok})
-
     async def _get_bootstrap(self, _: web.Request) -> web.Response:
         """No auth required — tells the config flow whether first-user setup is needed."""
         users = self.database.get_users()
@@ -725,7 +666,7 @@ class APIServer:
 </head>
 <body>
   <div class="card">
-    <h2>🛡️ HomeSecure v2.1</h2>
+    <h2>🛡️ HomeSecure v2.0</h2>
     <p class="status">✓ Container API is running</p>
     <br>
     <p>The UI is accessed via the <strong>Lovelace cards</strong> added to your dashboard.</p>

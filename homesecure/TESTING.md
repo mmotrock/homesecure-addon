@@ -115,7 +115,7 @@ and `bad_auth`. Write tests and arm/disarm are skipped with a warning.
 
 Expected output when everything is healthy:
 ```
-HomeSecure v2.1 — API Test Suite
+HomeSecure v2.0 — API Test Suite
 Target : http://localhost:8099
 Token  : none
 Groups : all

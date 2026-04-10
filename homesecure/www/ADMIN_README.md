@@ -39,7 +39,7 @@ entity: alarm_control_panel.homesecure
 | `api_url` | string | Container API URL. Auto-detected from HA hostname. |
 | `api_token` | string | API token if configured in the add-on. Default: none |
 
-## How the Admin Card Works (v2.1)
+## How the Admin Card Works (v2.0)
 
 The admin card communicates **directly with the HomeSecure container API** (port 8099) rather than going through Home Assistant services. This means:
 

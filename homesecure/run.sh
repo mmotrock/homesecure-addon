@@ -12,11 +12,7 @@ if [ "${DEBUG_LOGGING}" = "true" ]; then
 fi
 
 bashio::log.info "======================================================="
-<<<<<<< HEAD
-bashio::log.info " HomeSecure Container  v2.1.0"
-=======
 bashio::log.info " HomeSecure Container  v2.0.2"
->>>>>>> fix/v2.0.1
 bashio::log.info "======================================================="
 bashio::log.info " Z-Wave JS : ${ZWAVE_URL}"
 bashio::log.info " Log level : ${LOG_LEVEL}"
