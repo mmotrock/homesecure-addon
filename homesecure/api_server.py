@@ -434,6 +434,10 @@ class APIServer:
             )
         else:
             _LOGGER.warning("Auth rejected: PIN did not match any enabled admin user")
+            self.database.log_event(
+                "admin_login_failed",
+                details=json.dumps({"failed_attempts": failed_count + 1}),
+            )
             return web.json_response(
                 {"success": False, "error": "Invalid PIN"},
                 status=401,

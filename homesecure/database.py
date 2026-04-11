@@ -273,6 +273,7 @@ class AlarmDatabase:
         email: Optional[str] = None,
         has_separate_lock_pin: bool = False,
         lock_pin: Optional[str] = None,
+        changed_by: Optional[str] = None,
     ) -> Optional[int]:
         with self._conn() as conn:
             try:
@@ -297,7 +298,20 @@ class AlarmDatabase:
                 )
                 conn.commit()
                 uid = cur.lastrowid
-                self.log_event("user_added", user_id=uid, user_name=name)
+                details = json.dumps({
+                    "is_admin": is_admin,
+                    "is_duress": is_duress,
+                    "has_separate_lock_pin": has_separate_lock_pin,
+                    "has_phone": phone is not None,
+                    "has_email": email is not None,
+                })
+                self.log_event(
+                    "user_added",
+                    user_id=uid,
+                    user_name=name,
+                    details=details,
+                    triggered_by_name=changed_by,
+                )
                 return uid
             except Exception as exc:
                 _LOGGER.error("add_user error: %s", exc)
@@ -378,11 +392,12 @@ class AlarmDatabase:
             )
             return [dict(r) for r in cur.fetchall()]
 
-    def remove_user(self, user_id: int) -> bool:
+    def remove_user(self, user_id: int, changed_by: Optional[str] = None) -> bool:
         with self._conn() as conn:
             cur = conn.cursor()
             cur.execute(
-                f"SELECT is_admin, name FROM {TABLE_USERS} WHERE id=?", (user_id,)
+                f"SELECT name, is_admin, is_duress, enabled FROM {TABLE_USERS} WHERE id=?",
+                (user_id,),
             )
             user = cur.fetchone()
             if not user:
@@ -397,7 +412,18 @@ class AlarmDatabase:
                     return False
             cur.execute(f"DELETE FROM {TABLE_USERS} WHERE id=?", (user_id,))
             conn.commit()
-            self.log_event("user_deleted", user_id=user_id, user_name=user["name"])
+            details = json.dumps({
+                "was_admin": bool(user["is_admin"]),
+                "was_duress": bool(user["is_duress"]),
+                "was_enabled": bool(user["enabled"]),
+            })
+            self.log_event(
+                "user_deleted",
+                user_id=user_id,
+                user_name=user["name"],
+                details=details,
+                triggered_by_name=changed_by,
+            )
             return True
 
     def update_user(
@@ -411,24 +437,34 @@ class AlarmDatabase:
         email: Optional[str] = None,
         has_separate_lock_pin: Optional[bool] = None,
         lock_pin: Optional[str] = None,
+        changed_by: Optional[str] = None,
     ) -> bool:
         updates, values = [], []
+        changed_fields: list = []
         if name is not None:
             updates.append("name=?"); values.append(name)
+            changed_fields.append("name")
         if pin is not None:
             updates.append("pin_hash=?"); values.append(self.hash_pin(pin))
+            changed_fields.append("pin_changed")
         if is_admin is not None:
             updates.append("is_admin=?"); values.append(int(is_admin))
+            changed_fields.append("is_admin")
         if enabled is not None:
             updates.append("enabled=?"); values.append(int(enabled))
+            changed_fields.append("enabled")
         if phone is not None:
             updates.append("phone=?"); values.append(phone)
+            changed_fields.append("phone")
         if email is not None:
             updates.append("email=?"); values.append(email)
+            changed_fields.append("email")
         if has_separate_lock_pin is not None:
             updates.append("has_separate_lock_pin=?"); values.append(int(has_separate_lock_pin))
+            changed_fields.append("has_separate_lock_pin")
         if lock_pin is not None:
             updates.append("lock_pin_hash=?"); values.append(self.hash_pin(lock_pin))
+            changed_fields.append("lock_pin_changed")
         if not updates:
             return False
         values.append(user_id)
@@ -439,7 +475,13 @@ class AlarmDatabase:
                     values,
                 )
                 conn.commit()
-                self.log_event("user_updated", user_id=user_id)
+                details = json.dumps({"changed_fields": changed_fields})
+                self.log_event(
+                    "user_updated",
+                    user_id=user_id,
+                    details=details,
+                    triggered_by_name=changed_by,
+                )
                 return True
             except Exception as exc:
                 _LOGGER.error("update_user error: %s", exc)
@@ -469,7 +511,7 @@ class AlarmDatabase:
             row = cur.fetchone()
             return dict(row) if row else {}
 
-    def update_config(self, updates: Dict[str, Any]) -> bool:
+    def update_config(self, updates: Dict[str, Any], changed_by: Optional[str] = None) -> bool:
         if not updates:
             return False
 
@@ -493,16 +535,30 @@ class AlarmDatabase:
         values = list(updates.values())
         with self._conn() as conn:
             try:
+                # Capture previous values before overwriting
+                _INTERNAL_KEYS = {"service_pin", "bootstrap_pin"}
+                user_updates = {k: v for k, v in updates.items() if k not in _INTERNAL_KEYS}
+                previous_values: Dict[str, Any] = {}
+                if user_updates:
+                    cur = conn.cursor()
+                    cur.execute(f"SELECT * FROM {TABLE_CONFIG} WHERE id=1")
+                    row = cur.fetchone()
+                    if row:
+                        previous_values = {k: row[k] for k in user_updates if k in row.keys()}
+
                 conn.execute(
                     f"UPDATE {TABLE_CONFIG} SET {set_clause}, updated_at=CURRENT_TIMESTAMP WHERE id=1",
                     values,
                 )
                 conn.commit()
-                # Only log user-visible config changes, not internal system keys
-                _INTERNAL_KEYS = {"service_pin", "bootstrap_pin"}
-                user_updates = {k: v for k, v in updates.items() if k not in _INTERNAL_KEYS}
                 if user_updates:
-                    self.log_event("config_updated", details=json.dumps(user_updates))
+                    details: Dict[str, Any] = {
+                        "new_values": user_updates,
+                        "previous_values": previous_values,
+                    }
+                    if changed_by:
+                        details["changed_by"] = changed_by
+                    self.log_event("config_updated", details=json.dumps(details))
                 return True
             except Exception as exc:
                 _LOGGER.error("update_config error: %s", exc)
@@ -525,7 +581,16 @@ class AlarmDatabase:
         zone_entity_id: Optional[str] = None,
         details: Optional[str] = None,
         is_duress: bool = False,
+        triggered_by_name: Optional[str] = None,
     ) -> None:
+        # Merge triggered_by_name into the details JSON blob if provided
+        if triggered_by_name is not None:
+            try:
+                d = json.loads(details) if details else {}
+                d.setdefault("changed_by", triggered_by_name)
+                details = json.dumps(d)
+            except Exception:
+                pass
         with self._conn() as conn:
             try:
                 conn.execute(
@@ -737,6 +802,7 @@ class AlarmDatabase:
         entity_id: str,
         bypassed: bool,
         bypass_duration: Optional[int] = None,
+        user_name: Optional[str] = None,
     ) -> bool:
         bypass_until = None
         if bypassed and bypass_duration:
@@ -748,8 +814,16 @@ class AlarmDatabase:
                     (int(bypassed), bypass_until, entity_id),
                 )
                 conn.commit()
-                self.log_event("zone_bypass", zone_entity_id=entity_id,
-                               details=f"Bypassed:{bypassed}")
+                details = json.dumps({
+                    "bypassed": bypassed,
+                    "bypass_duration": bypass_duration,
+                })
+                self.log_event(
+                    "zone_bypass",
+                    zone_entity_id=entity_id,
+                    details=details,
+                    triggered_by_name=user_name,
+                )
                 return True
             except Exception as exc:
                 _LOGGER.error("set_zone_bypass error: %s", exc)

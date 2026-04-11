@@ -450,9 +450,11 @@ class AlarmCoordinator:
         if lock_pin and (not lock_pin.isdigit() or not (PIN_MIN_LEN <= len(lock_pin) <= PIN_MAX_LEN)):
             return {"success": False, "message": f"Lock PIN must be {PIN_MIN_LEN}–{PIN_MAX_LEN} digits"}
 
+        admin_name = admin["name"] if existing_users and admin else None
         uid = self.database.add_user(
             name, pin, is_admin, is_duress, phone, email,
             has_separate_lock_pin, lock_pin,
+            changed_by=admin_name,
         )
         if uid:
             return {"success": True, "message": f"User {name} added", "user_id": uid}
@@ -462,7 +464,7 @@ class AlarmCoordinator:
         admin = self._authenticate_service(admin_pin)
         if not admin or not admin.get("is_admin"):
             return {"success": False, "message": "Admin authentication required"}
-        if self.database.remove_user(user_id):
+        if self.database.remove_user(user_id, changed_by=admin["name"]):
             return {"success": True, "message": "User deleted"}
         return {"success": False, "message": "Failed to delete user (may be last admin)"}
 
@@ -493,7 +495,7 @@ class AlarmCoordinator:
         if name is not None and len(name) > NAME_MAX_LEN:
             return {"success": False, "message": f"Name must be {NAME_MAX_LEN} characters or fewer"}
 
-        if self.database.update_user(user_id, **filtered):
+        if self.database.update_user(user_id, changed_by=admin["name"], **filtered):
             return {"success": True, "message": "User updated"}
         return {"success": False, "message": "Failed to update user"}
 
@@ -507,7 +509,7 @@ class AlarmCoordinator:
             self._bypassed_zones.add(zone_entity_id)
         else:
             self._bypassed_zones.discard(zone_entity_id)
-        self.database.set_zone_bypass(zone_entity_id, bypass)
+        self.database.set_zone_bypass(zone_entity_id, bypass, user_name=user["name"])
         return {"success": True, "message": f"Zone {'bypassed' if bypass else 'unbypassed'}"}
 
     async def update_config(
@@ -516,6 +518,6 @@ class AlarmCoordinator:
         admin = self._authenticate_service(admin_pin)
         if not admin or not admin.get("is_admin"):
             return {"success": False, "message": "Admin authentication required"}
-        if self.database.update_config(updates):
+        if self.database.update_config(updates, changed_by=admin["name"]):
             return {"success": True, "message": "Configuration updated"}
         return {"success": False, "message": "Failed to update configuration"}
