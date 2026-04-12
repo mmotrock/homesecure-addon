@@ -56,6 +56,8 @@ class HomeSecureAdmin extends HTMLElement {
     this._authenticated = false;
     this._pin = '';
     this._adminPin = null;  // Store authenticated admin PIN
+    this._authenticatedUserId   = null;
+    this._authenticatedUserName = null;
     this._failedAttempts = 0;
     this._showReenablePin     = false;
     this._reenablePinUserId   = null;
@@ -848,10 +850,15 @@ class HomeSecureAdmin extends HTMLElement {
         ${this.renderContent()}
       `;
 
-      // Restore scroll position after re-render
+      // Restore scroll position after re-render.
+      // Use requestAnimationFrame so the browser has completed layout before
+      // we set scrollTop — otherwise the assignment is ignored because the
+      // new DOM hasn't been measured yet.
       if (scrollTop > 0) {
-        const newBody = this.shadowRoot.querySelector('.admin-body');
-        if (newBody) newBody.scrollTop = scrollTop;
+        requestAnimationFrame(() => {
+          const newBody = this.shadowRoot.querySelector('.admin-body');
+          if (newBody) newBody.scrollTop = scrollTop;
+        });
       }
 
       // Re-enable PIN dialog overlay
@@ -1700,7 +1707,7 @@ class HomeSecureAdmin extends HTMLElement {
       // Build stats summary from raw events
       const typeCounts = {};
       events.forEach(e => { typeCounts[e.event_type] = (typeCounts[e.event_type] || 0) + 1; });
-      this._eventStats = { total: events.length, by_type: typeCounts };
+      this._eventStats = { total_events: events.length, by_type: typeCounts };
       this.render();
     } catch (e) {
       _hs.error('Failed to load event stats:', e);
@@ -2329,6 +2336,9 @@ class HomeSecureAdmin extends HTMLElement {
         // Reset authentication when closing admin panel
         this._authenticated = false;
         this._pin = '';
+        this._adminPin = null;
+        this._authenticatedUserId   = null;
+        this._authenticatedUserName = null;
         this._currentView = 'auth';
         this.dispatchEvent(new CustomEvent('close-admin'));
       });
@@ -2533,6 +2543,12 @@ class HomeSecureAdmin extends HTMLElement {
         if (!this._config) this._config = {};
         this._config[mode + '_actions'] = JSON.stringify(actions);
       });
+      // Stop mousedown/pointerdown from bubbling to HA card layer which can
+      // swallow the event and prevent <select> dropdowns from opening on first click.
+      if (el.tagName === 'SELECT') {
+        el.addEventListener('mousedown',   e => e.stopPropagation());
+        el.addEventListener('pointerdown', e => e.stopPropagation());
+      }
     });
 
     this.shadowRoot.querySelectorAll('[data-action="save-security-settings"]').forEach(el => {
@@ -2665,6 +2681,19 @@ class HomeSecureAdmin extends HTMLElement {
           // Re-enabling — check if we need a PIN to restore lock access
           await this._reenableUser(user);
         } else {
+          // Guard: prevent self-disable
+          if (this._authenticatedUserId && this._authenticatedUserId === userId) {
+            this.showNotification('You cannot disable your own account', 'error');
+            return;
+          }
+          // Guard: prevent disabling the last enabled admin
+          if (user.is_admin) {
+            const otherEnabledAdmins = this._users.filter(u => u.is_admin && u.enabled && u.id !== userId);
+            if (otherEnabledAdmins.length === 0) {
+              this.showNotification('Cannot disable the last admin account', 'error');
+              return;
+            }
+          }
           // Disabling — update user then remove from all locks
           try {
             await this._apiPut(`/api/users/${userId}`, {
@@ -3195,6 +3224,8 @@ class HomeSecureAdmin extends HTMLElement {
     this._reenablePinValue    = '';
       this._lockedUntil = null;
       this._adminPin = this._pin;
+      this._authenticatedUserId   = data.user_id   || null;
+      this._authenticatedUserName = data.user_name || null;
       this._pin = '';
       this._currentView = 'user-list';
       this.saveLockoutState();

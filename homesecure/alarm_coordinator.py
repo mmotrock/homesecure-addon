@@ -478,6 +478,10 @@ class AlarmCoordinator:
         if not admin or not admin.get("is_admin"):
             return {"success": False, "message": "Admin authentication required"}
 
+        # Guard: prevent an admin from disabling their own account
+        if kwargs.get("enabled") is False and admin.get("id") == user_id:
+            return {"success": False, "message": "You cannot disable your own account"}
+
         # H6: strip any fields the caller is not allowed to set directly
         filtered = {k: v for k, v in kwargs.items() if k in ALLOWED_UPDATE_FIELDS}
         unknown  = set(kwargs) - ALLOWED_UPDATE_FIELDS

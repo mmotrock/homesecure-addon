@@ -321,6 +321,63 @@ Failed attempts are intentionally not migrated. The service PIN is regenerated f
 
 ---
 
+## [2.0.3] - 2026-04-11
+
+### Added
+- **Enriched event logging** — all audit log entries now include who made the
+  change, what was changed, and (where applicable) what the previous value was.
+  Specifically:
+  - `user_added` — logs the creating admin, plus new user's permissions
+    (`is_admin`, `is_duress`, `has_separate_lock_pin`, `has_phone`, `has_email`)
+  - `user_updated` — logs the acting admin and a list of which fields changed
+    (`pin_changed` / `lock_pin_changed` flags used instead of values — PINs are
+    never stored in logs)
+  - `user_deleted` — logs the acting admin and a snapshot of the deleted user's
+    prior state (`was_admin`, `was_duress`, `was_enabled`)
+  - `config_updated` — logs the acting admin, the new values, and the previous
+    values for every changed key
+  - `zone_bypass` — logs which user bypassed or unbypassed the zone and the
+    bypass duration
+  - `admin_login_failed` — new event type logged when an incorrect PIN is
+    entered on the admin card login screen; includes running failed attempt
+    count. Distinct from keypad disarm failures which go to `failed_attempts`
+    table
+  - All `state_change` events (arm/disarm) already captured user name and
+    state correctly — no changes needed there
+- **Last-admin disable protection** — the system now prevents the last enabled
+  admin account from being disabled, at both the database layer
+  (`update_user()`, `set_user_enabled()`) and the coordinator layer. The admin
+  card also checks before calling the API and shows an immediate error message.
+- **Self-disable prevention** — an admin can no longer disable their own
+  account. The coordinator rejects the request server-side; the admin card
+  also blocks it client-side using the authenticated user's ID stored at login.
+
+### Fixed
+- **Admin card scroll position jumps to top** on field changes (e.g. selecting
+  an entity or updating a delay in the Arm Actions section). The scroll
+  position was being saved correctly before re-render but restored
+  synchronously before the browser had completed layout, so the assignment was
+  discarded. Fixed by wrapping the restore in `requestAnimationFrame()` so it
+  runs after the browser paints.
+- **Total events counter always showed zero** in the Events tab stats panel
+  even when the by-type breakdown showed non-zero counts. `loadEventStats()`
+  was building the stats object with key `total` but the render function read
+  `total_events` — key mismatch caused it to always fall back to `0`. Key
+  unified to `total_events`.
+- **Arm action entity and action dropdowns** require a long-press to open in
+  some browsers / HA versions. The card's parent layer was intercepting the
+  initial `mousedown`/`pointerdown` before the browser could pass it to the
+  native `<select>`. Fixed by adding `stopPropagation()` on both events for
+  all `<select>` elements in the arm actions rows.
+
+### Changed
+- **No schema migration required** — all new logging data is stored in the
+  existing `details` TEXT column as JSON. No `ALTER TABLE` needed.
+- **Addon config** — `zwave_server_url`, `log_level`, and `debug_logging`
+  options are now hidden behind the "Show unused optional configuration
+  options" toggle in the HA addon config UI via the `advanced` block.
+  Reduces clutter for users who don't need to change these defaults.
+
 ## [2.0.2] - 2026-04-07
 
 ### Added

@@ -1,5 +1,5 @@
 name: HomeSecure
-version: "2.0.2"
+version: "2.0.3"
 slug: homesecure
 description: Complete home security system with alarm panel, user management, and Z-Wave lock integration.
 url: https://github.com/mmotrock/homesecure-addon
@@ -27,6 +27,10 @@ schema:
   log_level: list(debug|info|warning|error)?
   debug_logging: bool?
   api_token: str?
+advanced:
+  - zwave_server_url
+  - log_level
+  - debug_logging
 map:
   - config:rw
   - share:rw

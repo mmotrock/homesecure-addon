@@ -470,6 +470,21 @@ class AlarmDatabase:
         values.append(user_id)
         with self._conn() as conn:
             try:
+                # Guard: disabling a user — make sure they're not the last enabled admin
+                if enabled is not None and not enabled:
+                    cur = conn.cursor()
+                    cur.execute(
+                        f"SELECT is_admin FROM {TABLE_USERS} WHERE id=?", (user_id,)
+                    )
+                    target = cur.fetchone()
+                    if target and target["is_admin"]:
+                        cur.execute(
+                            f"SELECT COUNT(*) FROM {TABLE_USERS} WHERE is_admin=1 AND enabled=1 AND id!=?",
+                            (user_id,),
+                        )
+                        if cur.fetchone()[0] == 0:
+                            _LOGGER.error("Cannot disable the last enabled admin user")
+                            return False
                 conn.execute(
                     f"UPDATE {TABLE_USERS} SET {', '.join(updates)} WHERE id=?",
                     values,
@@ -490,6 +505,21 @@ class AlarmDatabase:
     def set_user_enabled(self, user_id: int, enabled: bool) -> bool:
         with self._conn() as conn:
             try:
+                # Guard: disabling — make sure they're not the last enabled admin
+                if not enabled:
+                    cur = conn.cursor()
+                    cur.execute(
+                        f"SELECT is_admin FROM {TABLE_USERS} WHERE id=?", (user_id,)
+                    )
+                    target = cur.fetchone()
+                    if target and target["is_admin"]:
+                        cur.execute(
+                            f"SELECT COUNT(*) FROM {TABLE_USERS} WHERE is_admin=1 AND enabled=1 AND id!=?",
+                            (user_id,),
+                        )
+                        if cur.fetchone()[0] == 0:
+                            _LOGGER.error("Cannot disable the last enabled admin user")
+                            return False
                 conn.execute(
                     f"UPDATE {TABLE_USERS} SET enabled=? WHERE id=?",
                     (int(enabled), user_id),
