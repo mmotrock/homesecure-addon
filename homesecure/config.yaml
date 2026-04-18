@@ -27,10 +27,6 @@ schema:
   log_level: list(debug|info|warning|error)?
   debug_logging: bool?
   api_token: str?
-advanced:
-  - zwave_server_url
-  - log_level
-  - debug_logging
 map:
   - config:rw
   - share:rw

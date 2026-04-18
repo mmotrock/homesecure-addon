@@ -470,9 +470,9 @@ class AlarmDatabase:
         values.append(user_id)
         with self._conn() as conn:
             try:
+                cur = conn.cursor()
                 # Guard: disabling a user — make sure they're not the last enabled admin
                 if enabled is not None and not enabled:
-                    cur = conn.cursor()
                     cur.execute(
                         f"SELECT is_admin FROM {TABLE_USERS} WHERE id=?", (user_id,)
                     )
@@ -484,6 +484,20 @@ class AlarmDatabase:
                         )
                         if cur.fetchone()[0] == 0:
                             _LOGGER.error("Cannot disable the last enabled admin user")
+                            return False
+                # Guard: removing is_admin — make sure they're not the last *enabled* admin
+                if is_admin is not None and not is_admin:
+                    cur.execute(
+                        f"SELECT is_admin FROM {TABLE_USERS} WHERE id=?", (user_id,)
+                    )
+                    target = cur.fetchone()
+                    if target and target["is_admin"]:
+                        cur.execute(
+                            f"SELECT COUNT(*) FROM {TABLE_USERS} WHERE is_admin=1 AND enabled=1 AND id!=?",
+                            (user_id,),
+                        )
+                        if cur.fetchone()[0] == 0:
+                            _LOGGER.error("Cannot remove admin from the last enabled admin user")
                             return False
                 conn.execute(
                     f"UPDATE {TABLE_USERS} SET {', '.join(updates)} WHERE id=?",

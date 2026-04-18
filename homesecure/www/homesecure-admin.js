@@ -2294,6 +2294,12 @@ class HomeSecureAdmin extends HTMLElement {
             this._usersLoaded = false;
             await this.loadUsers();
             await this.loadLocks();
+            // Resolve authenticated user identity from the freshly loaded users list
+            const bootstrapUser = this._users.find(u => u.name === name);
+            if (bootstrapUser) {
+              this._authenticatedUserId   = bootstrapUser.id;
+              this._authenticatedUserName = bootstrapUser.name;
+            }
             this.showNotification('Admin account created! Welcome to HomeSecure.', 'success');
             this.render();
           } else {
@@ -2388,7 +2394,33 @@ class HomeSecureAdmin extends HTMLElement {
       el.addEventListener('click', (e) => {
         const toggle = e.currentTarget.querySelector('.toggle-switch');
         const isActive = toggle.classList.contains('active');
-        
+        const removingAdmin = isActive; // currently active = removing admin
+
+        if (removingAdmin) {
+          const targetId = this._currentView === 'user-detail'
+            ? this._selectedUser?.id : null;
+
+          _hs.error('toggle-admin DEBUG: removingAdmin=true, targetId=' + targetId
+            + ' authenticatedUserId=' + this._authenticatedUserId
+            + ' currentView=' + this._currentView
+            + ' users=' + JSON.stringify(this._users.map(u => ({id:u.id,name:u.name,is_admin:u.is_admin,enabled:u.enabled}))));
+
+          // Guard: prevent self-deadmin
+          if (targetId !== null && targetId === this._authenticatedUserId) {
+            this.showNotification('You cannot remove admin permissions from your own account', 'error');
+            return;
+          }
+
+          // Guard: prevent removing the last enabled admin.
+          // Count enabled admins excluding the target — if zero remain, block it.
+          const otherEnabledAdmins = this._users.filter(u => u.is_admin && u.enabled && u.id !== targetId);
+          _hs.error('toggle-admin DEBUG: otherEnabledAdmins=' + otherEnabledAdmins.length);
+          if (otherEnabledAdmins.length === 0) {
+            this.showNotification('Cannot remove admin permissions from the last enabled admin account', 'error');
+            return;
+          }
+        }
+
         if (this._currentView === 'user-detail') {
           this._selectedUser.is_admin = !isActive;
         } else if (this._currentView === 'user-add') {

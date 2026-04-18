@@ -478,9 +478,34 @@ class AlarmCoordinator:
         if not admin or not admin.get("is_admin"):
             return {"success": False, "message": "Admin authentication required"}
 
-        # Guard: prevent an admin from disabling their own account
+        # Guard: prevent self-disable
         if kwargs.get("enabled") is False and admin.get("id") == user_id:
             return {"success": False, "message": "You cannot disable your own account"}
+
+        # Guard: prevent self-deadmin
+        if kwargs.get("is_admin") is False and admin.get("id") == user_id:
+            return {"success": False, "message": "You cannot remove admin permissions from your own account"}
+
+        # Guard: prevent removing is_admin from the last enabled admin.
+        # Do this check here in the coordinator (not just the DB layer) so the
+        # error message is clear and the check cannot be bypassed by type
+        # coercion differences between JSON and Python.
+        if "is_admin" in kwargs and not kwargs["is_admin"]:
+            users = self.database.get_users()
+            enabled_admins = [u for u in users if u.get("is_admin") and u.get("enabled")]
+            other_enabled_admins = [u for u in enabled_admins if u["id"] != user_id]
+            if not other_enabled_admins:
+                return {"success": False, "message": "Cannot remove admin permissions from the last enabled admin"}
+
+        # Guard: prevent disabling the last enabled admin.
+        if "enabled" in kwargs and not kwargs["enabled"]:
+            users = self.database.get_users()
+            enabled_admins = [u for u in users if u.get("is_admin") and u.get("enabled")]
+            target = next((u for u in users if u["id"] == user_id), None)
+            if target and target.get("is_admin"):
+                other_enabled_admins = [u for u in enabled_admins if u["id"] != user_id]
+                if not other_enabled_admins:
+                    return {"success": False, "message": "Cannot disable the last enabled admin"}
 
         # H6: strip any fields the caller is not allowed to set directly
         filtered = {k: v for k, v in kwargs.items() if k in ALLOWED_UPDATE_FIELDS}

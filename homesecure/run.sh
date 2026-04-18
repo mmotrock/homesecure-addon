@@ -21,7 +21,7 @@ bashio::log.info "======================================================="
 # ── Auto-install / update the HA integration ──────────────────────────────
 INTEGRATION_SRC="/app/custom_components/homesecure"
 INTEGRATION_DST="/config/custom_components/homesecure"
-ADDON_VERSION=$(bashio::addon.version 2>/dev/null || grep -m1 '^version:' /app/custom_components/homesecure/../../../config.yaml 2>/dev/null | tr -d '"' | awk '{print $2}' || echo "2.0.2")
+ADDON_VERSION=$(bashio::addon.version 2>/dev/null || grep -m1 '^version:' /app/custom_components/homesecure/../../../config.yaml 2>/dev/null | tr -d '"' | awk '{print $2}' || echo "2.0.3")
 
 _installed_version() {
     local manifest="${INTEGRATION_DST}/manifest.json"
