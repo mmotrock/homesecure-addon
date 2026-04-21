@@ -1,102 +1,278 @@
 # Changelog
 
-## [1.0.0] - 2024-01-XX
+## [2.0.3] - 2026-04-19
 
 ### Added
-- Initial release
-- Complete alarm system integration
-- Z-Wave lock management
-- User management with admin panel
-- Event logging
-- Lovelace dashboard cards
-- Web management interface
-- Multi-architecture Docker builds
-
-### Features
-- PIN-based authentication
-- Auto-lock on arm
-- Per-lock user access control
-- Dedicated logging system
-- Ingress web UI
-
-## [1.0.1] - 2026-03-06
-
-### Fixed
-- Removed invalid static file route in web_interface.py that caused
-  add-on startup failure (/app/install/web/static did not exist)
-- Fixed web UI "View Logs" link returning 404 error when accessed
-  via Home Assistant ingress by converting absolute URLs to relative paths
-- Fixed admin PIN authentication not working due to event names still
-  using old 'homesecure_' prefix instead of 'homesecure_' prefix
-- Fixed all remaining event name references migrated from homesecure_
-  to homesecure_ (users_response, user_pin_response, config_response,
-  events_response, verify_lock_access_response, etc.)
-- Fixed default entity references updated from
-  alarm_control_panel.homesecure to alarm_control_panel.homesecure
-- Fixed Z-Wave lock PIN not being set on locks - set_lock_code now
-  correctly sets userIdStatus=1 (enabled) before writing the PIN code,
-  which is required by the Z-Wave USER_CODE command class
-- Fixed Z-Wave lock code clearing to also set userIdStatus=0 so slots
-  are properly marked as available after removal
-- Fixed async_set_value calls to use value.value_id string identifier
-  instead of the value object, matching the zwave-js-server-python API
-- Fixed register_on_driver_ready replaced with correct
-  driver_events.on("driver ready") event listener API
-- Fixed PIN retrieval fallback in background lock sync to also attempt
-  re-reading from the target lock itself before giving up, with a
-  clearer log message when no PIN is available
-- Fixed retrieve lock PIN timeout using incorrect event name
-
-### Improved
-- Added inline PIN validation with red field highlighting for alarm PIN
-  and lock PIN fields - fields turn red on blur if length is invalid
-  and clear automatically once corrected
-- PIN validation errors now display as inline messages below the
-  offending field instead of HA persistent notification popups
-- Version number now automatically injected into manifest.json,
-  web_interface.py, and README.md badge during build from config.yaml
-  as single source of truth
-
-### Repository
-- Restructured repository layout to meet Home Assistant add-on store
-  requirements (add-on files moved to homesecure/ subdirectory)
-- Added repository.json to repo root
-- Fixed GitHub Actions workflow paths to reflect new directory structure
-- Fixed build.yaml to contain only HA add-on build configuration
-- Moved GitHub Actions workflow to .github/workflows/build.yml
-- Fixed ghcr.io push permissions by adding packages: write permission
-- Fixed Docker image builds failing due to PEP 668 by using Python
-  virtual environment in Dockerfile
-- Replaced sed-based version injection with Python regex for reliability
-
-## [1.0.2] - 2026-03-07
+- **Enriched event logging** — all audit log entries now include who made the
+  change, what was changed, and (where applicable) what the previous value was.
+  Specifically:
+  - `user_added` — logs the creating admin, plus new user's permissions
+    (`is_admin`, `is_duress`, `has_separate_lock_pin`, `has_phone`, `has_email`)
+  - `user_updated` — logs the acting admin and a list of which fields changed
+    (`pin_changed` / `lock_pin_changed` flags used instead of values — PINs are
+    never stored in logs)
+  - `user_deleted` — logs the acting admin and a snapshot of the deleted user's
+    prior state (`was_admin`, `was_duress`, `was_enabled`)
+  - `config_updated` — logs the acting admin, the new values, and the previous
+    values for every changed key
+  - `zone_bypass` — logs which user bypassed or unbypassed the zone and the
+    bypass duration
+  - `admin_login_failed` — new event type logged when an incorrect PIN is
+    entered on the admin card login screen; includes running failed attempt
+    count. Distinct from keypad disarm failures which go to `failed_attempts`
+    table
+  - All `state_change` events (arm/disarm) already captured user name and
+    state correctly — no changes needed there
+- **Last-admin disable protection** — the system now prevents the last enabled
+  admin account from being disabled, at both the database layer
+  (`update_user()`, `set_user_enabled()`) and the coordinator layer. The admin
+  card also checks before calling the API and shows an immediate error message.
+- **Self-disable prevention** — an admin can no longer disable their own
+  account. The coordinator rejects the request server-side; the admin card
+  also blocks it client-side using the authenticated user's ID stored at login.
 
 ### Fixed
-- Fixed PIN validation on new user form not showing inline field errors or
-  red highlighting - the add user form (renderUserAdd) was missing id
-  attributes and error div elements that the validation code required
-- Fixed PIN validation listeners not attaching to the add user form by
-  extracting them into a reusable attachPinValidation() method called
-  after every render, so validation now works on both add and edit forms
-- Fixed name field on new user form not highlighting red when left empty
-- Fixed Z-Wave server URL appearing in both the addon configuration tab
-  and the integration setup flow - URL is now configured in the addon
-  config only and passed to the integration automatically via
-  .addon_config.json, removing it from the integration config flow
-- Fixed notification messages (success/error) going to HA persistent
-  notifications instead of displaying inline in the admin panel
+- **Admin card scroll position jumps to top** on field changes (e.g. selecting
+  an entity or updating a delay in the Arm Actions section). The scroll
+  position was being saved correctly before re-render but restored
+  synchronously before the browser had completed layout, so the assignment was
+  discarded. Fixed by wrapping the restore in `requestAnimationFrame()` so it
+  runs after the browser paints.
+- **Total events counter always showed zero** in the Events tab stats panel
+  even when the by-type breakdown showed non-zero counts. `loadEventStats()`
+  was building the stats object with key `total` but the render function read
+  `total_events` — key mismatch caused it to always fall back to `0`. Key
+  unified to `total_events`.
+- **Arm action entity and action dropdowns** require a long-press to open in
+  some browsers / HA versions. The card's parent layer was intercepting the
+  initial `mousedown`/`pointerdown` before the browser could pass it to the
+  native `<select>`. Fixed by adding `stopPropagation()` on both events for
+  all `<select>` elements in the arm actions rows.
 
-### Improved
-- Replaced HA persistent notification calls with inline toast messages
-  that appear at the bottom of the admin card, providing immediate
-  feedback without cluttering the HA notification center
-- Integration setup flow simplified - users no longer need to enter the
-  Z-Wave server URL during integration setup as it is read automatically
-  from the addon configuration
-- Z-Wave server URL is now read from addon options via the supervisor API
-  at integration startup, with fallback to default URL if unavailable
+### Changed
+- **No schema migration required** — all new logging data is stored in the
+  existing `details` TEXT column as JSON. No `ALTER TABLE` needed.
+- **Addon config** — `zwave_server_url`, `log_level`, and `debug_logging`
+  options are now hidden behind the "Show unused optional configuration
+  options" toggle in the HA addon config UI via the `advanced` block.
+  Reduces clutter for users who don't need to change these defaults.
 
----
+## [2.0.2] - 2026-04-07
+
+### Added
+- **Arm Actions** — Security tab now has an "Arm Actions" section with separate
+  configuration for Arm Home and Arm Away. Each action specifies an entity
+  (`lock.*` or `cover.*`), an action (Lock / Close), and a delay in seconds
+  from when the arm command is received. Actions fire server-side via the HA
+  supervisor API so they work regardless of which source triggers the arm
+  (card, HA service, automation, voice).
+- **Audio alerts** via HA `media_player` entities — Devices tab in admin panel
+  allows selecting one or more media players for alarm tones. Three bundled
+  MP3 files copied to `/config/www/community/homesecure/` on startup:
+  `beep_short.mp3` (150ms, arm countdown + disarm confirm),
+  `beep_long.mp3` (600ms, armed confirmation),
+  `beep_entry.mp3` (400ms lower pitch, entry delay warning).
+  Badge card plays tones on state transitions: short beep every 2s during
+  arming, long beep on armed, entry beep every 2s during pending, short
+  confirm on disarm.
+- **Expandable event log rows** — clicking any event row in the Events tab
+  expands it to show full details: user, full timestamp, entity, previous
+  state, new state, mode, zone, IP address, and any other available fields.
+- **Debug logging in addon config tab** — `debug_logging: false` option added
+  to `config.yaml`. When enabled, overrides `log_level` and forces the Python
+  service to `DEBUG` level. Accessible even when the admin card won't load.
+- **`POST /api/locks/sync-user`** — sync one user to all locks with a provided
+  PIN; used by the re-enable PIN dialog.
+- **`POST /api/users/{id}/remove-from-locks`** — remove a user's codes from
+  all locks; called automatically when a user is disabled.
+- **`POST /api/locks/users/{id}/verify`** — targeted verify for one user
+  rather than a full sync of all users; used by the Verify Status button.
+- **`GET /api/locks/users/{id}`** — returns per-lock access state for one user.
+- **`POST /api/debug/clear-lockout`** — clears failed attempts without restart.
+
+### Fixed
+- **Arm without PIN no longer triggers failed attempt counter** — when
+  `require_pin_to_arm` is false and no PIN is provided, arming succeeds
+  without touching the failed-attempts counter. Previously every arm button
+  click counted as a failed auth attempt, causing phantom lockouts.
+- **UTC timezone mismatch** — all `datetime.now()` calls replaced with
+  `datetime.utcnow()` to match SQLite `CURRENT_TIMESTAMP` (UTC). Previously
+  the timezone offset caused failed attempts to appear recent long after they
+  had expired, causing lockouts to persist far longer than configured.
+- **`database.update_user()` now accepts `enabled` parameter** — was causing
+  a 500 error when toggling user enable/disable.
+- **Z-Wave lock discovery** — detects locks via value_id string parsing
+  (`nodeId-CC-endpoint-property-key`) since `node.command_classes` returns
+  empty in current zwave-js-server-python versions. 2-second delay added
+  after driver ready to allow node values to fully populate.
+- **`get_user_lock_status()` added to lock_manager** — was missing, causing
+  500 on all lock UI operations.
+- **`GET /api/users` returns `{"users": [...]}` format consistently.**
+- **Internal config changes** (service_pin) no longer logged as user-visible
+  config_updated events.
+- **CORS middleware** — fixes browser cards being blocked when calling the
+  container API across ports (HA on 8123, container on 8099).
+- **Admin card tab content** — correctly matches the active tab when
+  re-entering the admin panel. Previously `_currentView` state from the Users
+  tab leaked into other tabs, showing the user list regardless of which tab
+  was active.
+- **Admin card scroll position** saved and restored across renders.
+- **`updatePinDisplay()`** now enables the `confirm-arm` button as well as
+  the `disarm` button — previously the arm PIN keypad's enter button was
+  never enabled.
+- **Stale localStorage lockout state** cleared on card load and synced from
+  server.
+- **`loadUsers()` calls `render()`** after loading so the user list refreshes
+  immediately without requiring a separate interaction.
+- **User enable/disable toggle** now uses `PUT` (was incorrectly `POST`).
+- **Lock PIN cache** populated from locks on container startup so
+  enable/disable operations work after restart without re-entering PINs.
+- **Lock PIN persisted to DB** after sync so re-enable works after container
+  restart.
+- **Re-enable flow** — when re-enabling a user, if cached PIN is available the
+  lock access is restored automatically; otherwise a PIN keypad dialog prompts
+  the admin for the user's PIN.
+- **Entry point config editor** — field changes now create new object
+  references so HA detects and saves changes correctly (direct mutation was
+  silently ignored by HA's config-changed event handler).
+- **OptionsFlow 500** — `config_entry` removed from constructor call; HA sets
+  `self.config_entry` automatically in 2024.11+.
+- **Bootstrap flow** — `/api/bootstrap` endpoint allows first user creation
+  without PIN; config flow collects admin name and PIN during setup.
+- **`_get_usercode_value()` / `_get_userid_status_value()`** use value_id
+  string parsing for reliable operation across library versions.
+- **`sync_user_to_locks()` guard** for no managed locks prevents None slot
+  crash in log statement.
+
+### Changed
+- **Require PIN to arm** — badge card now shows a PIN keypad before sending
+  the arm command when `require_pin_to_arm` is enabled. Arm buttons show
+  "· PIN required" subtitle hint. Server config fetched once on card load.
+- **User disable** — now calls `POST /api/users/{id}/remove-from-locks`
+  automatically to clear lock codes when a user is disabled.
+- **Verify Status button** — now calls the targeted per-user verify endpoint
+  with 30s timeout instead of the full sync endpoint. Much faster.
+- **Sync to New button** — calls verify then reloads lock access state with
+  visual feedback on completion.
+- **Devices tab** — replaced "Coming Soon" placeholder with real media player
+  selection UI and volume control.
+- **`run.sh`** — reads `debug_logging` option and overrides `LOG_LEVEL` to
+  `debug` if set; copies audio MP3 files to Lovelace directory on startup.
+- **`config.yaml`** — `debug_logging: false` option added; port 8099 exposed
+  for direct LAN browser access.
+- **Debug console output** — `console.log` / `console.warn` removed from
+  normal card operation. All logging now goes through `_hs` shared logger
+  which is silent by default and verbose only when debug mode is enabled
+  (admin General tab toggle or `localStorage.setItem('homesecure_debug','1')`).
+
+## [2.0.1] - 2026-04-07
+
+### Added
+- **Arm Actions** — Security tab now has an "Arm Actions" section with separate
+  configuration for Arm Home and Arm Away. Each action specifies an entity
+  (`lock.*` or `cover.*`), an action (Lock / Close), and a delay in seconds
+  from when the arm command is received. Actions fire server-side via the HA
+  supervisor API so they work regardless of which source triggers the arm
+  (card, HA service, automation, voice).
+- **Audio alerts** via HA `media_player` entities — Devices tab in admin panel
+  allows selecting one or more media players for alarm tones. Three bundled
+  MP3 files copied to `/config/www/community/homesecure/` on startup:
+  `beep_short.mp3` (150ms, arm countdown + disarm confirm),
+  `beep_long.mp3` (600ms, armed confirmation),
+  `beep_entry.mp3` (400ms lower pitch, entry delay warning).
+  Badge card plays tones on state transitions: short beep every 2s during
+  arming, long beep on armed, entry beep every 2s during pending, short
+  confirm on disarm.
+- **Expandable event log rows** — clicking any event row in the Events tab
+  expands it to show full details: user, full timestamp, entity, previous
+  state, new state, mode, zone, IP address, and any other available fields.
+- **Debug logging in addon config tab** — `debug_logging: false` option added
+  to `config.yaml`. When enabled, overrides `log_level` and forces the Python
+  service to `DEBUG` level. Accessible even when the admin card won't load.
+- **`POST /api/locks/sync-user`** — sync one user to all locks with a provided
+  PIN; used by the re-enable PIN dialog.
+- **`POST /api/users/{id}/remove-from-locks`** — remove a user's codes from
+  all locks; called automatically when a user is disabled.
+- **`POST /api/locks/users/{id}/verify`** — targeted verify for one user
+  rather than a full sync of all users; used by the Verify Status button.
+- **`GET /api/locks/users/{id}`** — returns per-lock access state for one user.
+- **`POST /api/debug/clear-lockout`** — clears failed attempts without restart.
+
+### Fixed
+- **Arm without PIN no longer triggers failed attempt counter** — when
+  `require_pin_to_arm` is false and no PIN is provided, arming succeeds
+  without touching the failed-attempts counter. Previously every arm button
+  click counted as a failed auth attempt, causing phantom lockouts.
+- **UTC timezone mismatch** — all `datetime.now()` calls replaced with
+  `datetime.utcnow()` to match SQLite `CURRENT_TIMESTAMP` (UTC). Previously
+  the timezone offset caused failed attempts to appear recent long after they
+  had expired, causing lockouts to persist far longer than configured.
+- **`database.update_user()` now accepts `enabled` parameter** — was causing
+  a 500 error when toggling user enable/disable.
+- **Z-Wave lock discovery** — detects locks via value_id string parsing
+  (`nodeId-CC-endpoint-property-key`) since `node.command_classes` returns
+  empty in current zwave-js-server-python versions. 2-second delay added
+  after driver ready to allow node values to fully populate.
+- **`get_user_lock_status()` added to lock_manager** — was missing, causing
+  500 on all lock UI operations.
+- **`GET /api/users` returns `{"users": [...]}` format consistently.**
+- **Internal config changes** (service_pin) no longer logged as user-visible
+  config_updated events.
+- **CORS middleware** — fixes browser cards being blocked when calling the
+  container API across ports (HA on 8123, container on 8099).
+- **Admin card tab content** — correctly matches the active tab when
+  re-entering the admin panel. Previously `_currentView` state from the Users
+  tab leaked into other tabs, showing the user list regardless of which tab
+  was active.
+- **Admin card scroll position** saved and restored across renders.
+- **`updatePinDisplay()`** now enables the `confirm-arm` button as well as
+  the `disarm` button — previously the arm PIN keypad's enter button was
+  never enabled.
+- **Stale localStorage lockout state** cleared on card load and synced from
+  server.
+- **`loadUsers()` calls `render()`** after loading so the user list refreshes
+  immediately without requiring a separate interaction.
+- **User enable/disable toggle** now uses `PUT` (was incorrectly `POST`).
+- **Lock PIN cache** populated from locks on container startup so
+  enable/disable operations work after restart without re-entering PINs.
+- **Lock PIN persisted to DB** after sync so re-enable works after container
+  restart.
+- **Re-enable flow** — when re-enabling a user, if cached PIN is available the
+  lock access is restored automatically; otherwise a PIN keypad dialog prompts
+  the admin for the user's PIN.
+- **Entry point config editor** — field changes now create new object
+  references so HA detects and saves changes correctly (direct mutation was
+  silently ignored by HA's config-changed event handler).
+- **OptionsFlow 500** — `config_entry` removed from constructor call; HA sets
+  `self.config_entry` automatically in 2024.11+.
+- **Bootstrap flow** — `/api/bootstrap` endpoint allows first user creation
+  without PIN; config flow collects admin name and PIN during setup.
+- **`_get_usercode_value()` / `_get_userid_status_value()`** use value_id
+  string parsing for reliable operation across library versions.
+- **`sync_user_to_locks()` guard** for no managed locks prevents None slot
+  crash in log statement.
+
+### Changed
+- **Require PIN to arm** — badge card now shows a PIN keypad before sending
+  the arm command when `require_pin_to_arm` is enabled. Arm buttons show
+  "· PIN required" subtitle hint. Server config fetched once on card load.
+- **User disable** — now calls `POST /api/users/{id}/remove-from-locks`
+  automatically to clear lock codes when a user is disabled.
+- **Verify Status button** — now calls the targeted per-user verify endpoint
+  with 30s timeout instead of the full sync endpoint. Much faster.
+- **Sync to New button** — calls verify then reloads lock access state with
+  visual feedback on completion.
+- **Devices tab** — replaced "Coming Soon" placeholder with real media player
+  selection UI and volume control.
+- **`run.sh`** — reads `debug_logging` option and overrides `LOG_LEVEL` to
+  `debug` if set; copies audio MP3 files to Lovelace directory on startup.
+- **`config.yaml`** — `debug_logging: false` option added; port 8099 exposed
+  for direct LAN browser access.
+- **Debug console output** — `console.log` / `console.warn` removed from
+  normal card operation. All logging now goes through `_hs` shared logger
+  which is silent by default and verbose only when debug mode is enabled
+  (admin General tab toggle or `localStorage.setItem('homesecure_debug','1')`).
+
 
 ## [2.0.0] - 2026-04-05 — Complete Architecture Rewrite
 
@@ -319,169 +495,99 @@ Failed attempts are intentionally not migrated. The service PIN is regenerated f
 > **Upgrade note:** Existing databases are automatically migrated — new columns are
 > added via `ALTER TABLE` on first startup. No manual SQL required.
 
----
-
-## [2.0.3] - 2026-04-11
-
-### Added
-- **Enriched event logging** — all audit log entries now include who made the
-  change, what was changed, and (where applicable) what the previous value was.
-  Specifically:
-  - `user_added` — logs the creating admin, plus new user's permissions
-    (`is_admin`, `is_duress`, `has_separate_lock_pin`, `has_phone`, `has_email`)
-  - `user_updated` — logs the acting admin and a list of which fields changed
-    (`pin_changed` / `lock_pin_changed` flags used instead of values — PINs are
-    never stored in logs)
-  - `user_deleted` — logs the acting admin and a snapshot of the deleted user's
-    prior state (`was_admin`, `was_duress`, `was_enabled`)
-  - `config_updated` — logs the acting admin, the new values, and the previous
-    values for every changed key
-  - `zone_bypass` — logs which user bypassed or unbypassed the zone and the
-    bypass duration
-  - `admin_login_failed` — new event type logged when an incorrect PIN is
-    entered on the admin card login screen; includes running failed attempt
-    count. Distinct from keypad disarm failures which go to `failed_attempts`
-    table
-  - All `state_change` events (arm/disarm) already captured user name and
-    state correctly — no changes needed there
-- **Last-admin disable protection** — the system now prevents the last enabled
-  admin account from being disabled, at both the database layer
-  (`update_user()`, `set_user_enabled()`) and the coordinator layer. The admin
-  card also checks before calling the API and shows an immediate error message.
-- **Self-disable prevention** — an admin can no longer disable their own
-  account. The coordinator rejects the request server-side; the admin card
-  also blocks it client-side using the authenticated user's ID stored at login.
+## [1.0.2] - 2026-03-07
 
 ### Fixed
-- **Admin card scroll position jumps to top** on field changes (e.g. selecting
-  an entity or updating a delay in the Arm Actions section). The scroll
-  position was being saved correctly before re-render but restored
-  synchronously before the browser had completed layout, so the assignment was
-  discarded. Fixed by wrapping the restore in `requestAnimationFrame()` so it
-  runs after the browser paints.
-- **Total events counter always showed zero** in the Events tab stats panel
-  even when the by-type breakdown showed non-zero counts. `loadEventStats()`
-  was building the stats object with key `total` but the render function read
-  `total_events` — key mismatch caused it to always fall back to `0`. Key
-  unified to `total_events`.
-- **Arm action entity and action dropdowns** require a long-press to open in
-  some browsers / HA versions. The card's parent layer was intercepting the
-  initial `mousedown`/`pointerdown` before the browser could pass it to the
-  native `<select>`. Fixed by adding `stopPropagation()` on both events for
-  all `<select>` elements in the arm actions rows.
+- Fixed PIN validation on new user form not showing inline field errors or
+  red highlighting - the add user form (renderUserAdd) was missing id
+  attributes and error div elements that the validation code required
+- Fixed PIN validation listeners not attaching to the add user form by
+  extracting them into a reusable attachPinValidation() method called
+  after every render, so validation now works on both add and edit forms
+- Fixed name field on new user form not highlighting red when left empty
+- Fixed Z-Wave server URL appearing in both the addon configuration tab
+  and the integration setup flow - URL is now configured in the addon
+  config only and passed to the integration automatically via
+  .addon_config.json, removing it from the integration config flow
+- Fixed notification messages (success/error) going to HA persistent
+  notifications instead of displaying inline in the admin panel
 
-### Changed
-- **No schema migration required** — all new logging data is stored in the
-  existing `details` TEXT column as JSON. No `ALTER TABLE` needed.
-- **Addon config** — `zwave_server_url`, `log_level`, and `debug_logging`
-  options are now hidden behind the "Show unused optional configuration
-  options" toggle in the HA addon config UI via the `advanced` block.
-  Reduces clutter for users who don't need to change these defaults.
+### Improved
+- Replaced HA persistent notification calls with inline toast messages
+  that appear at the bottom of the admin card, providing immediate
+  feedback without cluttering the HA notification center
+- Integration setup flow simplified - users no longer need to enter the
+  Z-Wave server URL during integration setup as it is read automatically
+  from the addon configuration
+- Z-Wave server URL is now read from addon options via the supervisor API
+  at integration startup, with fallback to default URL if unavailable
 
-## [2.0.2] - 2026-04-07
-
-### Added
-- **Arm Actions** — Security tab now has an "Arm Actions" section with separate
-  configuration for Arm Home and Arm Away. Each action specifies an entity
-  (`lock.*` or `cover.*`), an action (Lock / Close), and a delay in seconds
-  from when the arm command is received. Actions fire server-side via the HA
-  supervisor API so they work regardless of which source triggers the arm
-  (card, HA service, automation, voice).
-- **Audio alerts** via HA `media_player` entities — Devices tab in admin panel
-  allows selecting one or more media players for alarm tones. Three bundled
-  MP3 files copied to `/config/www/community/homesecure/` on startup:
-  `beep_short.mp3` (150ms, arm countdown + disarm confirm),
-  `beep_long.mp3` (600ms, armed confirmation),
-  `beep_entry.mp3` (400ms lower pitch, entry delay warning).
-  Badge card plays tones on state transitions: short beep every 2s during
-  arming, long beep on armed, entry beep every 2s during pending, short
-  confirm on disarm.
-- **Expandable event log rows** — clicking any event row in the Events tab
-  expands it to show full details: user, full timestamp, entity, previous
-  state, new state, mode, zone, IP address, and any other available fields.
-- **Debug logging in addon config tab** — `debug_logging: false` option added
-  to `config.yaml`. When enabled, overrides `log_level` and forces the Python
-  service to `DEBUG` level. Accessible even when the admin card won't load.
-- **`POST /api/locks/sync-user`** — sync one user to all locks with a provided
-  PIN; used by the re-enable PIN dialog.
-- **`POST /api/users/{id}/remove-from-locks`** — remove a user's codes from
-  all locks; called automatically when a user is disabled.
-- **`POST /api/locks/users/{id}/verify`** — targeted verify for one user
-  rather than a full sync of all users; used by the Verify Status button.
-- **`GET /api/locks/users/{id}`** — returns per-lock access state for one user.
-- **`POST /api/debug/clear-lockout`** — clears failed attempts without restart.
+## [1.0.1] - 2026-03-06
 
 ### Fixed
-- **Arm without PIN no longer triggers failed attempt counter** — when
-  `require_pin_to_arm` is false and no PIN is provided, arming succeeds
-  without touching the failed-attempts counter. Previously every arm button
-  click counted as a failed auth attempt, causing phantom lockouts.
-- **UTC timezone mismatch** — all `datetime.now()` calls replaced with
-  `datetime.utcnow()` to match SQLite `CURRENT_TIMESTAMP` (UTC). Previously
-  the timezone offset caused failed attempts to appear recent long after they
-  had expired, causing lockouts to persist far longer than configured.
-- **`database.update_user()` now accepts `enabled` parameter** — was causing
-  a 500 error when toggling user enable/disable.
-- **Z-Wave lock discovery** — detects locks via value_id string parsing
-  (`nodeId-CC-endpoint-property-key`) since `node.command_classes` returns
-  empty in current zwave-js-server-python versions. 2-second delay added
-  after driver ready to allow node values to fully populate.
-- **`get_user_lock_status()` added to lock_manager** — was missing, causing
-  500 on all lock UI operations.
-- **`GET /api/users` returns `{"users": [...]}` format consistently.**
-- **Internal config changes** (service_pin) no longer logged as user-visible
-  config_updated events.
-- **CORS middleware** — fixes browser cards being blocked when calling the
-  container API across ports (HA on 8123, container on 8099).
-- **Admin card tab content** — correctly matches the active tab when
-  re-entering the admin panel. Previously `_currentView` state from the Users
-  tab leaked into other tabs, showing the user list regardless of which tab
-  was active.
-- **Admin card scroll position** saved and restored across renders.
-- **`updatePinDisplay()`** now enables the `confirm-arm` button as well as
-  the `disarm` button — previously the arm PIN keypad's enter button was
-  never enabled.
-- **Stale localStorage lockout state** cleared on card load and synced from
-  server.
-- **`loadUsers()` calls `render()`** after loading so the user list refreshes
-  immediately without requiring a separate interaction.
-- **User enable/disable toggle** now uses `PUT` (was incorrectly `POST`).
-- **Lock PIN cache** populated from locks on container startup so
-  enable/disable operations work after restart without re-entering PINs.
-- **Lock PIN persisted to DB** after sync so re-enable works after container
-  restart.
-- **Re-enable flow** — when re-enabling a user, if cached PIN is available the
-  lock access is restored automatically; otherwise a PIN keypad dialog prompts
-  the admin for the user's PIN.
-- **Entry point config editor** — field changes now create new object
-  references so HA detects and saves changes correctly (direct mutation was
-  silently ignored by HA's config-changed event handler).
-- **OptionsFlow 500** — `config_entry` removed from constructor call; HA sets
-  `self.config_entry` automatically in 2024.11+.
-- **Bootstrap flow** — `/api/bootstrap` endpoint allows first user creation
-  without PIN; config flow collects admin name and PIN during setup.
-- **`_get_usercode_value()` / `_get_userid_status_value()`** use value_id
-  string parsing for reliable operation across library versions.
-- **`sync_user_to_locks()` guard** for no managed locks prevents None slot
-  crash in log statement.
+- Removed invalid static file route in web_interface.py that caused
+  add-on startup failure (/app/install/web/static did not exist)
+- Fixed web UI "View Logs" link returning 404 error when accessed
+  via Home Assistant ingress by converting absolute URLs to relative paths
+- Fixed admin PIN authentication not working due to event names still
+  using old 'homesecure_' prefix instead of 'homesecure_' prefix
+- Fixed all remaining event name references migrated from homesecure_
+  to homesecure_ (users_response, user_pin_response, config_response,
+  events_response, verify_lock_access_response, etc.)
+- Fixed default entity references updated from
+  alarm_control_panel.homesecure to alarm_control_panel.homesecure
+- Fixed Z-Wave lock PIN not being set on locks - set_lock_code now
+  correctly sets userIdStatus=1 (enabled) before writing the PIN code,
+  which is required by the Z-Wave USER_CODE command class
+- Fixed Z-Wave lock code clearing to also set userIdStatus=0 so slots
+  are properly marked as available after removal
+- Fixed async_set_value calls to use value.value_id string identifier
+  instead of the value object, matching the zwave-js-server-python API
+- Fixed register_on_driver_ready replaced with correct
+  driver_events.on("driver ready") event listener API
+- Fixed PIN retrieval fallback in background lock sync to also attempt
+  re-reading from the target lock itself before giving up, with a
+  clearer log message when no PIN is available
+- Fixed retrieve lock PIN timeout using incorrect event name
 
-### Changed
-- **Require PIN to arm** — badge card now shows a PIN keypad before sending
-  the arm command when `require_pin_to_arm` is enabled. Arm buttons show
-  "· PIN required" subtitle hint. Server config fetched once on card load.
-- **User disable** — now calls `POST /api/users/{id}/remove-from-locks`
-  automatically to clear lock codes when a user is disabled.
-- **Verify Status button** — now calls the targeted per-user verify endpoint
-  with 30s timeout instead of the full sync endpoint. Much faster.
-- **Sync to New button** — calls verify then reloads lock access state with
-  visual feedback on completion.
-- **Devices tab** — replaced "Coming Soon" placeholder with real media player
-  selection UI and volume control.
-- **`run.sh`** — reads `debug_logging` option and overrides `LOG_LEVEL` to
-  `debug` if set; copies audio MP3 files to Lovelace directory on startup.
-- **`config.yaml`** — `debug_logging: false` option added; port 8099 exposed
-  for direct LAN browser access.
-- **Debug console output** — `console.log` / `console.warn` removed from
-  normal card operation. All logging now goes through `_hs` shared logger
-  which is silent by default and verbose only when debug mode is enabled
-  (admin General tab toggle or `localStorage.setItem('homesecure_debug','1')`).
+### Improved
+- Added inline PIN validation with red field highlighting for alarm PIN
+  and lock PIN fields - fields turn red on blur if length is invalid
+  and clear automatically once corrected
+- PIN validation errors now display as inline messages below the
+  offending field instead of HA persistent notification popups
+- Version number now automatically injected into manifest.json,
+  web_interface.py, and README.md badge during build from config.yaml
+  as single source of truth
+
+### Repository
+- Restructured repository layout to meet Home Assistant add-on store
+  requirements (add-on files moved to homesecure/ subdirectory)
+- Added repository.json to repo root
+- Fixed GitHub Actions workflow paths to reflect new directory structure
+- Fixed build.yaml to contain only HA add-on build configuration
+- Moved GitHub Actions workflow to .github/workflows/build.yml
+- Fixed ghcr.io push permissions by adding packages: write permission
+- Fixed Docker image builds failing due to PEP 668 by using Python
+  virtual environment in Dockerfile
+- Replaced sed-based version injection with Python regex for reliability
+
+## [1.0.0] - 2024-01-XX
+
+### Added
+- Initial release
+- Complete alarm system integration
+- Z-Wave lock management
+- User management with admin panel
+- Event logging
+- Lovelace dashboard cards
+- Web management interface
+- Multi-architecture Docker builds
+
+### Features
+- PIN-based authentication
+- Auto-lock on arm
+- Per-lock user access control
+- Dedicated logging system
+- Ingress web UI
+
